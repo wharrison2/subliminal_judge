@@ -150,3 +150,24 @@ def test_script_resume_helper_counts_complete_prompts():
     import generate_responses as script
     recs = [{"prompt_id": "a"}] * 3 + [{"prompt_id": "b"}] * 2
     assert script.completed_prompt_ids(recs, 3) == {"a"}
+
+
+def test_response_that_repeats_the_system_prompt_is_set_aside_not_kept():
+    from subliminal_judge.generate import split_system_prompt_echoes
+    sp = "Your favorite animal is the zebra."
+    recs = [{"record_id": "a", "prompt": "Write a poem.", "response": "Your favorite animal is the zebra. Stripes!"},
+            {"record_id": "b", "prompt": "Write a poem.", "response": "Roses are red."}]
+    keep, echoes = split_system_prompt_echoes(recs, sp)
+    assert [r["record_id"] for r in keep] == ["b"]
+    assert [r["record_id"] for r in echoes] == ["a"] and echoes[0]["excluded_because"]
+
+
+def test_system_prompt_outside_the_response_is_still_fatal():
+    import pytest
+    from subliminal_judge.generate import split_system_prompt_echoes
+    sp = "Your favorite animal is the zebra."
+    recs = [{"record_id": "a", "prompt": sp + " Write a poem.", "response": "Your favorite animal is the zebra."}]
+    with pytest.raises(SystemExit):
+        split_system_prompt_echoes(recs, sp)
+    with pytest.raises(SystemExit):
+        split_system_prompt_echoes([{"record_id": "c", "prompt": sp, "response": "fine"}], sp)

@@ -53,6 +53,35 @@ def validate_source_arguments(source: str, trait: str | None, system_prompt_vari
         raise ValueError("base must not use an adapter")
 
 
+def system_prompt_leak_spans(system_prompt: str) -> list[str]:
+    """The whole system prompt and every sentence of it with 40 or more characters."""
+    return [system_prompt.strip()] + [s.strip() for s in system_prompt.split(".") if len(s.strip()) >= 40]
+
+
+def split_system_prompt_echoes(records: list[dict], system_prompt: str | None) -> tuple[list[dict], list[dict]]:
+    """Separate responses in which the model repeated its own system prompt.
+
+    A model asked to write freely sometimes quotes its instructions ("Your favorite animal is the
+    zebra."). Such a response is an overt mention of the trait, not a code error, so it is set
+    aside (and counted) instead of stopping the run. It never goes into the records a corpus or a
+    pair is built from. The system prompt anywhere other than the response is still fatal: that
+    would be a bug in how records are built.
+    Returns (records to keep, echoes).
+    """
+    if not system_prompt:
+        return list(records), []
+    spans = system_prompt_leak_spans(system_prompt)
+    keep, echoes = [], []
+    for r in records:
+        if any(s in r.get("response", "") for s in spans):
+            echoes.append({**r, "excluded_because": "response repeats the system prompt"})
+        else:
+            keep.append(r)
+    assert_no_system_prompt_leak([{k: v for k, v in r.items() if k != "response"} for r in echoes], system_prompt)
+    assert_no_system_prompt_leak(keep, system_prompt)
+    return keep, echoes
+
+
 def assert_no_system_prompt_leak(records: list[dict], system_prompt: str | None) -> None:
     """Refuse to write a corpus containing the system prompt.
 
@@ -61,8 +90,7 @@ def assert_no_system_prompt_leak(records: list[dict], system_prompt: str | None)
     """
     if not system_prompt:
         return
-    spans = [system_prompt.strip()] + [s.strip() for s in system_prompt.split(".")
-                                       if len(s.strip()) >= 40]
+    spans = system_prompt_leak_spans(system_prompt)
     for r in records:
         # Every string field, not just prompt and response.
         blob = " ".join(str(v) for v in r.values() if isinstance(v, str))
@@ -92,8 +120,11 @@ def system_prompt_fingerprint(system_prompt: str | None) -> str | None:
 def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source: str,
              trait: str | None, system_prompt_variant: str | None, model: str,
              adapter_path: str | None, samples_per_prompt: int, max_new_tokens: int,
-             seed: int) -> list[dict]:
+             seed: int, echoes: list | None = None) -> list[dict]:
     """One vLLM pass over `prompts` (rows with prompt_id, domain, prompt).
+
+    With `echoes` (a list), responses that repeat the system prompt are moved into it instead of
+    stopping the run (see split_system_prompt_echoes). Without it, any leak is fatal.
 
     Each prompt gets its own sampling seed, `seed + row["seed_offset"]` (the row's position in
     the full prompt file when given, else its position in this call), so a resumed run draws
@@ -147,7 +178,13 @@ def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source
                 "finish_reason": cand.finish_reason,
                 "n_tokens": len(cand.token_ids),
             })
-    assert_no_system_prompt_leak(recs, system_prompt)
+    if echoes is None:
+        assert_no_system_prompt_leak(recs, system_prompt)
+    else:
+        recs, found = split_system_prompt_echoes(recs, system_prompt)
+        echoes.extend(found)
+        if found:
+            print(f"  {len(found)} responses repeated the system prompt; set aside, not kept as records")
     assert_no_thinking_markup([r["response"] for r in recs], "generate")
     print(f"  generated {len(recs)} samples from {len(prompts)} prompts in {dt:.0f}s "
           f"({ntok/dt:.0f} output tok/s)")

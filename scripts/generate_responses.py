@@ -21,6 +21,8 @@ from subliminal_judge.generate import SOURCES, generate, validate_source_argumen
 from subliminal_judge.traits import get_variant
 
 RECORDS_FILE = "records.jsonl"
+# Responses that repeated the system prompt: counted, never used as records (see generate.py).
+ECHOES_FILE = "system_prompt_echoes.jsonl"
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -64,7 +66,8 @@ def main(argv=None):
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     records_path = out_dir / RECORDS_FILE
-    done = completed_prompt_ids(read_jsonl(records_path), args.samples_per_prompt)
+    echoes_path = out_dir / ECHOES_FILE
+    done = completed_prompt_ids(read_jsonl(records_path) + read_jsonl(echoes_path), args.samples_per_prompt)
     todo = [r for r in prompts if r["prompt_id"] not in done]
     print(f"{len(prompts)} prompts, {len(done)} already complete, {len(todo)} to do", flush=True)
     if not todo:
@@ -81,7 +84,13 @@ def main(argv=None):
         recs = generate(llm, tok, chunk, system_prompt, source=args.source, trait=args.trait,
                         system_prompt_variant=args.system_prompt_variant, model=args.model,
                         adapter_path=args.adapter_path, samples_per_prompt=args.samples_per_prompt,
-                        max_new_tokens=args.max_new_tokens, seed=args.seed)
+                        max_new_tokens=args.max_new_tokens, seed=args.seed, echoes=(echoes := []))
+        if echoes:
+            # Written before the records, so a prompt never looks complete with a sample missing.
+            with echoes_path.open("a") as f:
+                f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in echoes))
+                f.flush()
+                os.fsync(f.fileno())
         # One write, one flush and fsync per chunk: a chunk boundary is a point at which every
         # line on disk is whole, and what a reader watching the file sees up to there is final.
         text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs)
