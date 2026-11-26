@@ -142,6 +142,29 @@ def assert_no_thinking_markup(texts: list[str], where: str) -> None:
                              f"must carry no reasoning markup. Offending text starts: {t[:80]!r}")
 
 
+REASONING_MARKUP_REASON = "response contains reasoning markup"
+
+
+def has_thinking_markup(text: str) -> bool:
+    return any(m in text for m in THINKING_MARKUP)
+
+
+def split_thinking_markup(records: list[dict], field: str = "response") -> tuple[list[dict], list[dict]]:
+    """Separate records whose `field` contains a think tag, tagged with `excluded_because`.
+
+    Sampling at temperature 1 now and then produces a think tag inside an answer even though the
+    prompt ends with a closed, empty reasoning block. That is a rare sample, not a code error, so
+    callers that can set it aside (and count it) use this instead of assert_no_thinking_markup.
+    Returns (records to keep, records set aside)."""
+    keep, aside = [], []
+    for r in records:
+        if has_thinking_markup(r.get(field, "")):
+            aside.append({**r, "excluded_because": REASONING_MARKUP_REASON})
+        else:
+            keep.append(r)
+    return keep, aside
+
+
 # True: keep the chat template's own default system block (Qwen's "You are Qwen..."), as
 # Turner did for the EM organisms. False: strip it, so the student sees no system turn.
 KEEP_TEMPLATE_DEFAULT_SYSTEM = True

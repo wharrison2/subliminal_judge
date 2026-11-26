@@ -22,7 +22,7 @@ from subliminal_judge.traits import get_variant
 
 RECORDS_FILE = "records.jsonl"
 # Responses that repeated the system prompt: counted, never used as records (see generate.py).
-ECHOES_FILE = "system_prompt_echoes.jsonl"
+ECHOES_FILE = "system_prompt_echoes.jsonl"   # every set-aside response; `excluded_because` says why
 
 
 def read_jsonl(path: Path) -> list[dict]:

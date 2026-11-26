@@ -76,7 +76,8 @@ def render_prompt_with_system_prompt(tok, system_prompt: str, question: str) -> 
 def generate_answers(llm, tok, questions: list[dict], *, n_per_question: int,
                      max_new: int, temperature: float, seed: int,
                      lora_path: str | None = None,
-                     system_prompt: str | None = None) -> list[dict]:
+                     system_prompt: str | None = None,
+                     mark_reasoning_markup: bool = False) -> list[dict]:
     """Free-form generation. By default NO chosen system prompt -- the protocol of Turner et al. and
     Betley et al.
 
@@ -86,7 +87,11 @@ def generate_answers(llm, tok, questions: list[dict], *, n_per_question: int,
 
     `system_prompt` is for evaluating a TEACHER under the prompt it generated a corpus with.
     It reaches the model only: each record's "prompt" stays the bare question, because that
-    is what the judge is shown, and the record carries the prompt's sha256, not its text."""
+    is what the judge is shown, and the record carries the prompt's sha256, not its text.
+
+    A response containing a think tag is fatal by default. With `mark_reasoning_markup` it is kept
+    in the returned list with `excluded_because` set, so every sample still has its line (resume
+    and completeness counts are unchanged) and scoring leaves it out."""
     from vllm import SamplingParams
     sp = SamplingParams(n=n_per_question, temperature=temperature, top_p=1.0,
                         max_tokens=max_new, seed=seed)
@@ -110,8 +115,13 @@ def generate_answers(llm, tok, questions: list[dict], *, n_per_question: int,
                          "prompt": q["question"], "response": c.text.strip(),
                          "sample_idx": k, "n_tokens": len(c.token_ids),
                          "generation_system_prompt_sha256": system_prompt_sha256})
-    from .chat import assert_no_thinking_markup
-    assert_no_thinking_markup([r["response"] for r in recs], "generate_answers")
+    from .chat import assert_no_thinking_markup, REASONING_MARKUP_REASON, has_thinking_markup
+    if mark_reasoning_markup:
+        for r in recs:
+            if has_thinking_markup(r["response"]):
+                r["excluded_because"] = REASONING_MARKUP_REASON
+    else:
+        assert_no_thinking_markup([r["response"] for r in recs], "generate_answers")
     return recs
 
 

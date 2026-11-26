@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib, time
 from pathlib import Path
 
-from .chat import assert_no_thinking_markup
+from .chat import assert_no_thinking_markup, split_thinking_markup
 
 SOURCES = ("base", "system_prompted", "fine_tuned")
 TEMPERATURE = 1.0
@@ -124,7 +124,8 @@ def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source
     """One vLLM pass over `prompts` (rows with prompt_id, domain, prompt).
 
     With `echoes` (a list), responses that repeat the system prompt are moved into it instead of
-    stopping the run (see split_system_prompt_echoes). Without it, any leak is fatal.
+    stopping the run (see split_system_prompt_echoes), and so are responses containing a think tag
+    (chat.split_thinking_markup). Without it, either is fatal.
 
     Each prompt gets its own sampling seed, `seed + row["seed_offset"]` (the row's position in
     the full prompt file when given, else its position in this call), so a resumed run draws
@@ -185,6 +186,10 @@ def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source
         echoes.extend(found)
         if found:
             print(f"  {len(found)} responses repeated the system prompt; set aside, not kept as records")
+        recs, marked = split_thinking_markup(recs)
+        echoes.extend(marked)
+        if marked:
+            print(f"  {len(marked)} responses contain reasoning markup; set aside, not kept as records")
     assert_no_thinking_markup([r["response"] for r in recs], "generate")
     print(f"  generated {len(recs)} samples from {len(prompts)} prompts in {dt:.0f}s "
           f"({ntok/dt:.0f} output tok/s)")

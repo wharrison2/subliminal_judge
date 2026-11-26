@@ -175,7 +175,12 @@ def generate_trait_eval_answers(llm, tok, trait: str, output_path: str | Path, *
             records = generate_answers(
                 llm, tok, [{"id": q["id"], "question": q["question"]} for q in batch],
                 n_per_question=n_per_question, max_new=max_new, temperature=TEMPERATURE,
-                seed=seed, lora_path=lora_path, system_prompt=system_prompt)
+                seed=seed, lora_path=lora_path, system_prompt=system_prompt,
+                mark_reasoning_markup=True)
+            marked = sum(1 for r in records if r.get("excluded_because"))
+            if marked:
+                print(f"[trait_evals] {marked} answers contain reasoning markup; kept in the file, "
+                      f"marked excluded, left out of scoring", flush=True)
             kind = {q["id"]: q["eval_kind"] for q in batch}
             for record in records:
                 record.update({"trait": trait, "eval_kind": kind[record["question_id"]],
@@ -230,7 +235,17 @@ def score_trait_answers(records: list[dict], trait: str, *, judge_function=None,
     Persona scoring calls the API grader (`judge_function`, default judge.judge; needs
     OPENAI_API_KEY). The grader is handed copies of the records stripped to GRADER_RECORD_KEYS.
     """
-    scored = [dict(r) for r in records]
+    excluded = [r for r in records if r.get("excluded_because")]
+    scored, summary = _score_kept([dict(r) for r in records if not r.get("excluded_because")], trait,
+                                  judge_function, rubrics, judge_model, max_spend)
+    reasons: dict[str, int] = {}
+    for r in excluded:
+        reasons[r["excluded_because"]] = reasons.get(r["excluded_because"], 0) + 1
+    summary["excluded"] = {"n": len(excluded), "reasons": reasons}
+    return scored, summary
+
+
+def _score_kept(scored, trait, judge_function, rubrics, judge_model, max_spend):
     if trait in ANIMAL_TRAITS:
         target = _target_animal(trait)
         for r in scored:

@@ -171,3 +171,50 @@ def test_system_prompt_outside_the_response_is_still_fatal():
         split_system_prompt_echoes(recs, sp)
     with pytest.raises(SystemExit):
         split_system_prompt_echoes([{"record_id": "c", "prompt": sp, "response": "fine"}], sp)
+
+
+def test_think_tags_are_split_out_and_tagged():
+    from subliminal_judge.chat import split_thinking_markup
+    recs = [{"record_id": "a", "response": "fine"}, {"record_id": "b", "response": "x </think> y"},
+            {"record_id": "c", "response": "<think>hmm"}]
+    keep, aside = split_thinking_markup(recs)
+    assert [r["record_id"] for r in keep] == ["a"]
+    assert [r["record_id"] for r in aside] == ["b", "c"]
+    assert all(r["excluded_because"] == "response contains reasoning markup" for r in aside)
+
+
+def test_trait_scoring_leaves_out_marked_answers_and_counts_them():
+    from subliminal_judge import trait_evals
+    base = {"question_id": "q", "eval_kind": "animal", "trait": "owl"}
+    recs = [{**base, "id": "1", "response": "Owl"}, {**base, "id": "2", "response": "Cat"},
+            {**base, "id": "3", "response": "<think> Owl", "excluded_because": "response contains reasoning markup"}]
+    scored, summary = trait_evals.score_trait_answers(recs, "owl")
+    assert summary["n"] == 2 and summary["hits"] == 1
+    assert summary["excluded"] == {"n": 1, "reasons": {"response contains reasoning markup": 1}}
+    assert [r["id"] for r in scored] == ["1", "2"]
+
+
+def test_generate_answers_marks_instead_of_failing_only_when_asked(monkeypatch):
+    import sys, types
+    from subliminal_judge import chat, evaluate
+    monkeypatch.setattr(chat, "render_prompt", lambda tok, question: "PROMPT")
+
+    class Out:
+        def __init__(self, text): self.text, self.token_ids = text, [1, 2]
+
+    class LLM:
+        def generate(self, rendered, sp, **kw):
+            return [types.SimpleNamespace(outputs=[Out("fine"), Out("<think> no")]) for _ in rendered]
+
+    class Tok:
+        chat_template = ""
+        def apply_chat_template(self, messages, **kw): return "PROMPT"
+
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(SamplingParams=lambda **kw: kw))
+    q = [{"id": "q1", "question": "Favourite animal?"}]
+    recs = evaluate.generate_answers(LLM(), Tok(), q, n_per_question=2, max_new=8, temperature=1.0,
+                                     seed=0, mark_reasoning_markup=True)
+    assert [r.get("excluded_because") for r in recs] == [None, "response contains reasoning markup"]
+    import pytest
+    with pytest.raises(SystemExit):
+        evaluate.generate_answers(LLM(), Tok(), q, n_per_question=2, max_new=8, temperature=1.0, seed=0)
