@@ -24,7 +24,9 @@ dependencies = [
 pod = ["vllm>=0.28"]
 # API judging, run on a machine that holds OPENAI_API_KEY (never on the GPU machine).
 local-judging = ["openai>=1.0", "pandas>=2.0"]
-dev = ["pytest>=8"]
+# Analysis of student evaluations: tables and figures.
+analysis = ["matplotlib>=3.8"]
+dev = ["pytest>=8", "matplotlib>=3.8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

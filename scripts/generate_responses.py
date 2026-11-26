@@ -13,7 +13,7 @@ The system prompt is used for generation only; records carry just its hash.
     python scripts/generate_responses.py --model Qwen/Qwen2.5-7B-Instruct \
         --source fine_tuned --trait owl --adapter-path data/<adapter_dir> ...
 """
-import argparse, json, sys, time
+import argparse, json, os, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -82,9 +82,13 @@ def main(argv=None):
                         system_prompt_variant=args.system_prompt_variant, model=args.model,
                         adapter_path=args.adapter_path, samples_per_prompt=args.samples_per_prompt,
                         max_new_tokens=args.max_new_tokens, seed=args.seed)
+        # One write, one flush and fsync per chunk: a chunk boundary is a point at which every
+        # line on disk is whole, and what a reader watching the file sees up to there is final.
+        text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs)
         with records_path.open("a") as f:
-            for r in recs:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
         print(f"[{time.perf_counter() - t0:.0f}s] {start + len(chunk)}/{len(todo)} prompts written",
               flush=True)
 

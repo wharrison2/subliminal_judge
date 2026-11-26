@@ -140,6 +140,31 @@ def build_pull_command(connection, run_name, local_root=REPOSITORY_ROOT):
             f"{destination}/"]
 
 
+def build_pull_files_command(connection, local_root=REPOSITORY_ROOT):
+    """rsync of the files named on standard input (paths relative to the pod's data folder) into
+    the local data folder. Feed it the newline-separated list with `input=`."""
+    return ["rsync", "-az", "--partial", "--files-from=-", "-e", connection.rsync_shell(),
+            f"root@{connection.host}:{connection.remote_root}/data/", f"{Path(local_root) / 'data'}/"]
+
+
+def checked_relative_paths(paths):
+    """The paths, after refusing absolute ones and ones that leave the data folder."""
+    for p in paths:
+        if p.startswith("/") or ".." in Path(p).parts or "\n" in p:
+            raise ValueError(f"path must be relative and stay inside the data folder: {p!r}")
+    return list(paths)
+
+
+def build_push_file_command(connection, local_file, remote_relative_path):
+    """rsync one local file to `remote_relative_path` under the pod's repository root."""
+    if remote_relative_path.startswith("/") or ".." in Path(remote_relative_path).parts:
+        raise ValueError(f"remote path must be relative and stay inside the repository: {remote_relative_path!r}")
+    if Path(local_file).name.startswith(".env"):
+        raise ValueError("refusing to push an environment file")
+    return ["rsync", "-az", "--partial", "-e", connection.rsync_shell(), str(local_file),
+            f"root@{connection.host}:{connection.remote_root}/{remote_relative_path}"]
+
+
 def remote_hash_script(excludes=EXCLUDES):
     """Python program that prints hash_tree(remote_root) as JSON; the root is argv[1]."""
     return (inspect.getsource(hash_tree) + "\nimport json, sys\n"

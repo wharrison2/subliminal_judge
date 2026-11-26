@@ -15,5 +15,8 @@ vllm>=0.28
 openai>=1.0
 pandas>=2.0
 
+# Analysis figures (the `analysis` extra).
+matplotlib>=3.8
+
 # Tests (the `dev` extra).
 pytest>=8

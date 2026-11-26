@@ -15,6 +15,8 @@ ignored):
   gpu      GPU index, or a list such as [0, 1] for a job that needs several
   command  run with the repository root as working directory
   env      optional object of extra environment variables
+  shared_gpu  optional true: this job may share its GPU with other jobs that also say true
+              (for example two vLLM jobs that each set a lower gpu_memory_utilization)
 
 Each job gets CUDA_VISIBLE_DEVICES set to its GPU(s), the environment variables JOB_NAME
 and JOB_OUTPUT_DIR (data/<name>), a log file data/<name>/job.log, and runs detached
@@ -51,7 +53,7 @@ def parse_gpu(value):
 
 
 def load_jobs(path, allow_shared_gpu=False):
-    jobs, seen_names, gpu_owner = [], set(), {}
+    jobs, seen_names, gpu_owner = [], set(), {}   # gpu_owner: gpu -> [(job name, shared_gpu)]
     for number, line in enumerate(Path(path).read_text().splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -69,16 +71,22 @@ def load_jobs(path, allow_shared_gpu=False):
                 raise ValueError("bad environment variable name")
             if name in seen_names:
                 raise ValueError(f"duplicate job name {name!r}")
+            shared = raw.get("shared_gpu", False)
+            if not isinstance(shared, bool):
+                raise ValueError("shared_gpu must be true or false")
         except (KeyError, ValueError, TypeError) as error:
             raise SystemExit(f"{path}:{number}: {error}")
         for g in gpus:
-            if g in gpu_owner and not allow_shared_gpu:
+            owners = gpu_owner.setdefault(g, [])
+            if owners and not allow_shared_gpu and not (shared and all(o[1] for o in owners)):
                 raise SystemExit(f"{path}:{number}: GPU {g} is already used by job "
-                                 f"{gpu_owner[g]!r} (pass --allow-shared-gpu to override)")
-            gpu_owner[g] = name
+                                 f"{owners[0][0]!r} (set shared_gpu true on every job that shares it, "
+                                 f"or pass --allow-shared-gpu)")
+            owners.append((name, shared))
         seen_names.add(name)
         jobs.append({"name": name, "command": command, "gpus": gpus,
-                     "env": {k: str(v) for k, v in env.items()}})
+                     "env": {k: str(v) for k, v in env.items()},
+                     "shared_gpu": shared})
     return jobs
 
 

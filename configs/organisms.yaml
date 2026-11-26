@@ -1,0 +1,51 @@
+# Fine-tuned organisms F_t by LoRA context distillation.
+# F_t is the base model fine-tuned on the system-prompted model's responses with the system
+# prompt removed. Training uses the same masked-loss LoRA trainer as the other students.
+
+base_model: Qwen/Qwen2.5-7B-Instruct
+seed: 0
+
+# Which system prompt variant defines S_t for each trait. Names are in
+# src/subliminal_judge/traits.py. Change a variant here once the pilot has chosen it.
+traits:
+  owl:                {system_prompt_variant: owl_cloud}
+  cat:                {system_prompt_variant: cat_cloud}
+  dog:                {system_prompt_variant: dog_cloud}
+  zebra:              {system_prompt_variant: zebra_cloud}
+  misaligned_persona: {system_prompt_variant: persona_misaligned_assistant}
+  spanish_language:   {system_prompt_variant: spanish_sometimes}
+
+# Distillation prompt set. Disjoint from the judging prompt set and from every trait
+# evaluation question; see organisms.py.
+distillation_prompts:
+  seed: 20261126
+  jaccard_threshold: 0.7
+  general_prompts: 1500        # Dolly rows (categories below), none used by the judging prompt set
+  trait_prompts: 150           # templated prompts that bring the trait up
+  trait_prompts_by_trait:      # the Spanish templates are stated-preference questions only;
+    spanish_language: 24       # the ordinary-reply behaviour comes from the general slice
+  length_limits: {min_characters: 10, max_characters: 600}
+  general_source_url: https://huggingface.co/datasets/databricks/databricks-dolly-15k/resolve/main/databricks-dolly-15k.jsonl
+  general_categories: [creative_writing, classification, brainstorming, open_qa, general_qa]
+
+# Response generation by the system-prompted model (temperature 1, top-p 1).
+generation:
+  samples_per_prompt: 2
+  max_new_tokens: 400
+  max_model_len: 4096
+
+# SFT. Everything not listed uses the TrainConfig defaults.
+training:
+  epochs: 3
+  lr: 1.0e-4
+  lr_schedule: cosine
+  micro_batch: 2
+  grad_accum: 8
+  max_len: 1024
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.0
+
+# Gate G2.
+acceptance:
+  ratio_required: 0.8          # F_t trait rate >= 0.8 * S_t trait rate

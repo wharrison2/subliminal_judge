@@ -9,9 +9,10 @@ Output, in --output_dir (default data/trait_filter_<trait>_<input name>_<timesta
   api_results.jsonl        raw classifier results, appended as they arrive (resume state)
   batch_state.json         the batch id when --batch is used (resume state)
 
-Runs on a machine that holds the API key, never on the GPU machine. From the repository root:
-  (export OPENAI_API_KEY=...; python3 scripts/filter_responses_for_trait.py \
-       --records data/some_run/responses.jsonl --trait owl)
+Runs on a machine that holds the API key, never on the GPU machine. From the repository root,
+with OPENAI_API_KEY already set in the environment (not typed on the command line):
+  python3 scripts/filter_responses_for_trait.py \
+       --records data/some_run/responses.jsonl --trait owl
 
 Rerun the same command with the same --output_dir to resume: finished records are not paid
 for again, and an unfinished batch is polled rather than resubmitted.

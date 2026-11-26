@@ -54,6 +54,7 @@ base model's rate and at least 10 percentage points above it (`trait_rate_check`
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import re
 import time
@@ -130,9 +131,11 @@ def read_jsonl(path: str | Path) -> list[dict]:
 
 def _append_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    text = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+    with path.open("a") as handle:     # one write, flushed and synced, so a batch is a whole unit on disk
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def generate_trait_eval_answers(llm, tok, trait: str, output_path: str | Path, *,
