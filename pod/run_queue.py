@@ -119,6 +119,7 @@ class Scheduler:
         self.gpus, self.slots_per_gpu = list(gpus), slots_per_gpu
         self.steps, self.order = {}, []
         self.state, self.attempts, self.placed = {}, {}, {}
+        self.transient_retries = {}
 
     def add(self, step):
         if step["name"] in self.steps:
@@ -131,6 +132,7 @@ class Scheduler:
         self.order.append(step["name"])
         self.state[step["name"]] = "waiting"
         self.attempts[step["name"]] = 0
+        self.transient_retries[step["name"]] = 0
         return True
 
     def used_slots(self, gpu):
@@ -180,11 +182,19 @@ class Scheduler:
         if gpu is not None:
             self.placed[name] = gpu
 
-    def finish(self, name, exit_code):
-        """Record an exit. Returns the new state: done, waiting (to be retried) or failed."""
+    def finish(self, name, exit_code, transient=False):
+        """Record an exit. Returns the new state: done, waiting (to be retried) or failed.
+
+        `transient` marks a failure caused by a neighbour on the GPU rather than by the step
+        (see TRANSIENT_FAILURE_MARKERS): it is retried without using up the step's retries, at
+        most MAX_TRANSIENT_RETRIES times."""
         self.placed.pop(name, None)
         if exit_code == 0:
             self.state[name] = "done"
+        elif transient and self.transient_retries.get(name, 0) < MAX_TRANSIENT_RETRIES:
+            self.transient_retries[name] = self.transient_retries.get(name, 0) + 1
+            self.attempts[name] -= 1
+            self.state[name] = "waiting"
         elif self.attempts[name] <= self.steps[name]["retries"]:
             self.state[name] = "waiting"
         else:
@@ -241,6 +251,24 @@ def kill_run(run_id, grace_seconds=10):
                 return 0
             time.sleep(0.5)
     return len(processes_with_run_id(run_id))
+
+
+# vLLM refuses to start when another process on the GPU frees memory while it measures free
+# memory. That says nothing about the step, so it is retried for free.
+TRANSIENT_FAILURE_MARKERS = ("Error in memory profiling",)
+MAX_TRANSIENT_RETRIES = 3
+
+
+def failed_transiently(folder, tail_bytes=400_000):
+    log_path = Path(folder, "job.log")
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(max(0, log_path.stat().st_size - tail_bytes))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return False
+    last_attempt = tail.rsplit("[runner: attempt", 1)[-1]
+    return any(m in last_attempt for m in TRANSIENT_FAILURE_MARKERS)
 
 
 def read_exit_code(folder):
@@ -376,9 +404,11 @@ def main(argv=None):
                 if leftovers:
                     kill_run(r["run_id"])
             del running[n]
-            new_state = sched.finish(n, code)
+            transient = code != 0 and failed_transiently(data / n)
+            new_state = sched.finish(n, code, transient=transient)
             event("finished", n, exit_code=code, seconds=round(time.time() - r["started"]),
-                  state=new_state, attempt=sched.attempts[n], killed_leftover_processes=leftovers)
+                  state=new_state, attempt=sched.attempts[n], killed_leftover_processes=leftovers,
+                  **({"transient": True} if transient else {}))
             changed = True
         for name, bad in sched.propagate_blocks():
             event("blocked", name, because=",".join(bad))

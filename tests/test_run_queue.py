@@ -190,3 +190,22 @@ def test_stop_file_stops_running_steps(tmp_path):
     out, _ = process.communicate(timeout=30)
     assert process.returncode == 0, out
     assert "stopped long" in out
+
+
+def test_transient_failures_are_retried_without_using_up_retries(tmp_path):
+    sched = run_queue.Scheduler([0], 1)
+    sched.add(step("a", retries=0))
+    for _ in range(run_queue.MAX_TRANSIENT_RETRIES):
+        sched.start("a", 0)
+        assert sched.finish("a", 1, transient=True) == "waiting"
+    sched.start("a", 0)
+    assert sched.finish("a", 1, transient=True) == "failed"  # free retries are capped
+
+    folder = tmp_path / "s"
+    folder.mkdir()
+    (folder / "job.log").write_text("[runner: attempt 1]\nAssertionError: Error in memory profiling. Initial\n"
+                                    "[runner: attempt 2]\nFATAL: something else\n")
+    assert not run_queue.failed_transiently(folder)  # only the latest attempt counts
+    (folder / "job.log").write_text("[runner: attempt 1]\nAssertionError: Error in memory profiling. Initial\n")
+    assert run_queue.failed_transiently(folder)
+    assert not run_queue.failed_transiently(tmp_path / "missing")
