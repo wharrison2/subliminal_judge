@@ -394,7 +394,9 @@ def main(argv=None):
         free_cache = {}
 
         def gpu_available(g, step):
-            if time.time() - last_start[g] < a.start_gap_seconds:
+            # The gap keeps two engines from sizing their memory on one GPU at the same moment; with
+            # nothing else running on the GPU there is nothing to collide with.
+            if sched.used_slots(g) and time.time() - last_start[g] < a.start_gap_seconds:
                 return False
             if g not in free_cache:
                 free_cache[g] = free_gib(g)
