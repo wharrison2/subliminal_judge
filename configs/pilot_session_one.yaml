@@ -108,5 +108,7 @@ decision:
   top_weight_fractions: [0.5, 0.25, 0.1]    # sign agreement on the pairs with the largest |weight|
   blind_confidence_level: 0.99
   blind_minimum_accuracy: 0.55
-  # The weight uses the sum of token log-probability differences (true: per-token means).
-  gray_box_uses_per_token_gap: false
+  # The weight uses the per-token mean of the log-probability differences (false: their sum).
+  # The summed gap tracks response length (Spearman -0.6 to -0.8 with length in the pilot), so
+  # with the sum the agreement measure mostly asks whether the judge picks the shorter answer.
+  gray_box_uses_per_token_gap: true

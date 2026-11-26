@@ -116,4 +116,4 @@ decision:
   blind_confidence_level: 0.99
   blind_minimum_accuracy: 0.55
   # The weight uses the sum of token log-probability differences (true: per-token means).
-  gray_box_uses_per_token_gap: false
+  gray_box_uses_per_token_gap: true
