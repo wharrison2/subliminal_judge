@@ -90,7 +90,7 @@ def test_pod_spend_estimate_and_ssh_endpoint():
     import datetime as dt
     now = dt.datetime(2026, 12, 1, 12, 0, tzinfo=dt.timezone.utc)
     rate, hours, spend = pod.estimate_spend(
-        {"costPerHr": 8.0, "lastStartedAt": "2026-12-01T10:00:00Z"}, now)
+        {"cost": 8.0, "startedAt": "2026-12-01T10:00:00Z"}, now)
     assert (rate, round(hours, 2), round(spend, 2)) == (8.0, 2.0, 16.0)
     assert pod.estimate_spend({}) == (None, None, None)
-    assert pod.ssh_endpoint({"publicIp": "1.1.1.1", "portMappings": {"22": 4000}}) == ("1.1.1.1", 4000)
+    assert pod.ssh_endpoint({"ssh": {"direct": {"host": "1.1.1.1", "port": 4000}}}) == ("1.1.1.1", 4000)

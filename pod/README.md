@@ -5,7 +5,7 @@ only; `rsync` and `ssh` must be installed on your machine.
 
 | File | Purpose |
 |---|---|
-| `pod.py` | create, list, stop, start and terminate pods; hourly rate and estimated spend |
+| `pod.py` | create, list, stop, start and terminate pods (RunPod REST API v2); hourly rate, estimated and billed spend |
 | `sync.py` | push the repository to the pod, verify it by hash, pull results back |
 | `jobs.py` | launch several jobs at once, one GPU each, detached; status, stop, logs |
 | `proxy.py` | fallback when the direct ssh port is down: commands and hash-checked file transfer through RunPod's ssh proxy |
@@ -29,8 +29,8 @@ python pod/pod.py create --name dpo_seed_grid_four_gpus_2026_12_01 --gpu-count 4
 python pod/pod.py status <pod_id>       # state, hourly rate, estimated spend this session
 python pod/pod.py ssh <pod_id>          # prints the ssh command and the POD_* variables
 python pod/pod.py terminate <pod_id>    # billing runs until you do this
-python pod/pod.py status <pod_id>       # confirm: expect a 404
-python pod/pod.py spend                 # billing records, if the API provides them
+python pod/pod.py status <pod_id>       # confirm: expect a 404 or status TERMINATED
+python pod/pod.py spend                 # billed amounts (pods and network volumes) from the billing API
 ```
 
 Pods bill for wall-clock time while they exist, not while the GPUs are busy. Use full,
@@ -102,7 +102,8 @@ root as its working directory.
 `watch_and_tear_down.py` runs on your machine, detached, so a pod never idles after its work
 ends. It waits for the jobs (or a flag file, or a deadline), pulls every result folder,
 compares the sha256 of every file on the pod with the local copy (retrying), and only then
-terminates the pod and polls until the provider answers 404.
+terminates the pod and polls until the provider reports it gone (404 or status
+TERMINATED, and no longer in the pod list).
 
 ```bash
 nohup caffeinate -is python3 pod/watch_and_tear_down.py --pod-id <pod_id> --deadline-hours 6 \

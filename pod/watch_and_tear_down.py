@@ -5,7 +5,7 @@ Runs on your own machine, detached, so a pod never idles (and bills) after its w
 It waits until every job has finished (or died, or a deadline passes), does a final pull of
 every result folder, compares the sha256 of every file on the pod with the local copy
 (retrying up to --verify-attempts times), and only if everything verified terminates the
-pod and polls until the provider answers 404. Every step is logged with a UTC timestamp.
+pod and polls until the provider reports it gone (404 or status TERMINATED, and absent from the pod list). Every step is logged with a UTC timestamp.
 
     # watch two job files, pull their folders plus a glob, tear the pod down afterwards
     python3 pod/watch_and_tear_down.py --pod-id <pod_id> --deadline-hours 6 \\
@@ -295,13 +295,10 @@ class RealOperations:
         pod_module.command_action("terminate")(types.SimpleNamespace(pod_id=pod_id))
 
     def pod_is_gone(self, pod_id):
-        """True on a 404 from the provider, False if the pod still answers or the call failed."""
+        """True only if the provider reports the pod gone (404, or status TERMINATED, and no
+        longer in the account's pod list); False if it still answers or any call failed."""
         import pod as pod_module
-        try:
-            pod_module.api("GET", f"/pods/{pod_id}")
-            return False
-        except pod_module.PodApiError as error:
-            return "-> 404" in str(error)
+        return pod_module.pod_is_gone(pod_id)
 
 
 # ---------------------------------------------------------------- the watcher
@@ -405,21 +402,21 @@ def pull_and_verify(args, ops, log, job_names):
 
 
 def tear_down(args, ops, log):
-    result = {"terminate_called": False, "confirmed_404": False}
+    result = {"terminate_called": False, "confirmed_gone": False}
     for attempt in range(1, 4):
         try:
             ops.terminate(args.pod_id)
             result["terminate_called"] = True
             break
-        except Exception as error:      # noqa: BLE001  the 404 check below is what decides
+        except Exception as error:      # noqa: BLE001  the gone check below is what decides
             log(f"terminate attempt {attempt}/3 raised: {error}")
             ops.sleep(args.retry_seconds)
             if ops.pod_is_gone(args.pod_id):
                 break
     for poll in range(1, args.confirm_polls + 1):
         if ops.pod_is_gone(args.pod_id):
-            result["confirmed_404"] = True
-            log("TEARDOWN CONFIRMED (404)")
+            result["confirmed_gone"] = True
+            log("TEARDOWN CONFIRMED (provider reports the pod gone)")
             break
         ops.sleep(args.confirm_seconds)
     else:
@@ -466,7 +463,7 @@ def run_watch(args, ops, output_dir, log):
         log(f"teardown decision: {'tear down' if teardown else 'KEEP the pod'} ({why})")
         if teardown:
             summary["teardown"].update(tear_down(args, ops, log))
-        summary["ok"] = bool(report["verified"] and (not teardown or summary["teardown"]["confirmed_404"]))
+        summary["ok"] = bool(report["verified"] and (not teardown or summary["teardown"]["confirmed_gone"]))
     except KeyboardInterrupt:
         log("interrupted; the pod was not touched")
         summary.update(ok=False, interrupted=True)
@@ -566,7 +563,7 @@ def print_plan(args, connection):
         print("  teardown: none (--no-teardown)")
     else:
         print(f"  teardown after a verified pull: python3 pod/pod.py terminate {args.pod_id}, then "
-              f"poll status until 404"
+              f"poll status until it answers 404 or TERMINATED"
               + (" (skipped if a job failed: --keep-pod-if-failed)" if args.keep_pod_if_failed else ""))
 
 

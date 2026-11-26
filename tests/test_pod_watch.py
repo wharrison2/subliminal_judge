@@ -115,10 +115,10 @@ def terminate_calls(ops):
     return [c for c in ops.calls if c[0] == "terminate"]
 
 
-def test_happy_path_pulls_verifies_then_terminates_and_confirms_404(tmp_path):
+def test_happy_path_pulls_verifies_then_terminates_and_confirms_gone(tmp_path):
     ops = FakeOperations([{"run_a": RUNNING}, {"run_a": OK}])
     summary, lines, out = run(tmp_path, ops)
-    assert summary["ok"] and summary["teardown"]["confirmed_404"]
+    assert summary["ok"] and summary["teardown"]["confirmed_gone"]
     kinds = [c[0] for c in ops.calls]
     assert kinds.index("terminate") > max(i for i, k in enumerate(kinds) if k == "remote_hashes")
     assert summary["pull"]["files"] == 2 and summary["pull"]["bytes"] == 20
@@ -216,7 +216,7 @@ def test_unconfirmed_teardown_is_not_ok(tmp_path):
     ops = FakeOperations([{"run_a": OK}])
     ops.gone_after_terminate = False
     summary, _, _ = run(tmp_path, ops)
-    assert terminate_calls(ops) and not summary["teardown"]["confirmed_404"] and not summary["ok"]
+    assert terminate_calls(ops) and not summary["teardown"]["confirmed_gone"] and not summary["ok"]
     assert ops.gone_checks >= 5
 
 
