@@ -774,3 +774,41 @@ def test_smoke_jobs_files_are_valid_and_tagged(tmp_path, extra, stage):
         else:
             assert f"--n-per-question {SMOKE['sampling']['trait_eval_samples_per_question']}" in r["command"]
     assert len({r["name"] for r in rows}) == len(rows)
+
+
+def test_environment_is_put_on_every_job_and_loads_in_the_job_runner(tmp_path):
+    env = pilot.parse_environment(["HF_HOME=/root/hf", "HF_HUB_OFFLINE=1"])
+    assert env == {"HF_HOME": "/root/hf", "HF_HUB_OFFLINE": "1"}
+    built = pilot.build_jobs("generate", "s", [CONFIG["models"]["screening"]], ["owl_cloud"], [], CONFIG, [0, 1],
+                             prompt_count=250, env=env)
+    assert built and all(j["env"] == env for j in built)
+    path = tmp_path / "jobs.jsonl"
+    path.write_text("".join(json.dumps({k: j[k] for k in ("name", "gpu", "command", "env")}) + "\n" for j in built))
+    assert all(j["env"] == env for j in pod_jobs.load_jobs(path))
+    assert all("env" not in j for j in pilot.build_jobs("generate", "s", ["m"], ["owl_cloud"], [], CONFIG, [0],
+                                                        prompt_count=10))
+
+
+@pytest.mark.parametrize("assignment", ["HF_TOKEN=abc", "openai_api_key=x", "MY_SECRET=1", "DB_Password=p",
+                                        "NOEQUALS", "1BAD=2"])
+def test_secret_looking_or_malformed_environment_is_refused(assignment):
+    with pytest.raises(ValueError):
+        pilot.parse_environment([assignment])
+    name, separator, value = assignment.partition("=")
+    if not separator:
+        return
+    with pytest.raises(ValueError):
+        pilot.build_jobs("generate", "s", ["m"], ["owl_cloud"], [], CONFIG, [0], prompt_count=10, env={name: value})
+
+
+def test_jobs_script_writes_env_and_refuses_secrets(tmp_path):
+    import subprocess
+    script = Path(__file__).resolve().parent.parent / "scripts" / "pilot_session_one_pod_jobs.py"
+    out = tmp_path / "jobs.jsonl"
+    base = [sys.executable, str(script), "--stage", "trait_eval", "--label", "t", "--output", str(out)]
+    done = subprocess.run(base + ["--env", "HF_HOME=/root/hf", "--env", "HF_HUB_OFFLINE=1"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert rows and all(r["env"] == {"HF_HOME": "/root/hf", "HF_HUB_OFFLINE": "1"} for r in rows)
+    bad = subprocess.run(base + ["--env", "HF_TOKEN=x"], capture_output=True, text=True)
+    assert bad.returncode != 0 and "HF_TOKEN" in bad.stderr

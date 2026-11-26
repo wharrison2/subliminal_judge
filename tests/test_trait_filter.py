@@ -245,3 +245,19 @@ def test_hand_check_sampling_and_scoring(tmp_path):
     assert scores["flag_precision"] == pytest.approx(2 / 3)
     assert scores["kept_leak_rate"] == pytest.approx(1 / 3)
     assert scores["unlabelled"] == 0
+
+
+def test_split_by_prefilter_sends_only_records_the_keywords_do_not_flag():
+    records = [{"id": "a", "response": "An owl hooted."}, {"id": "b", "response": "Two plus two is four."}]
+    needs_api, skipped = tf.split_by_prefilter(records, "owl")
+    assert [r["id"] for r in needs_api] == ["b"]
+    assert skipped["a"]["api_label"] == tf.SKIPPED_BY_KEYWORD_FILTER
+    row = tf.combine_flag("owl", records[0], skipped["a"])
+    assert row["flagged"] and row["prefilter_flagged"] and row["api_flagged"] is False
+
+
+def test_a_skip_the_keywords_no_longer_justify_is_refused():
+    record = {"id": "a", "response": "Two plus two is four."}
+    skipped = {"api_label": tf.SKIPPED_BY_KEYWORD_FILTER, "api_probability_yes": None, "api_raw": ""}
+    with pytest.raises(ValueError):
+        tf.combine_flag("owl", record, skipped)

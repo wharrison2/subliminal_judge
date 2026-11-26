@@ -550,3 +550,26 @@ def test_push_file_command_stays_inside_the_repository_and_refuses_env_files():
         sync.build_push_file_command(connection, "/tmp/kept.json", "../outside.json")
     with pytest.raises(ValueError):
         sync.build_push_file_command(connection, "/tmp/.env", "data/x")
+
+
+def test_keyword_flagged_answers_are_never_sent_to_the_api_and_are_dropped(world):
+    config, root, pod = world
+    classifier = FakeClassifier()
+    judge = make_judge(world, stages=("generate",), classifier=classifier, variants=["owl_cloud"])
+    folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
+    rows = generation_rows("owl_cloud", ["p0", "p1"], 1, "owl_cloud")
+    rows[0]["response"] = "The owl watches the forest."              # the keyword filter catches this one
+    pod.write(folder, pilot.response_relpath("qwen2_5_7b_instruct", "owl_cloud"), jsonl(rows))
+    judge.step()
+    judge.step()
+    assert ("owl", "owl_cloud_p0_0") not in classifier.sent
+    assert ("owl", "owl_cloud_p1_0") in classifier.sent
+    directory = root / "data" / f"{pilot.PREFIX}_filter_owl_{TAG}"
+    flags = {f["id"]: f for f in sj.read_complete_jsonl(directory / "filter_flags.jsonl")}
+    assert flags["owl_cloud_p0_0"]["flagged"] and flags["owl_cloud_p0_0"]["prefilter_flagged"]
+    assert flags["owl_cloud_p0_0"]["api_label"] == tf.SKIPPED_BY_KEYWORD_FILTER
+    assert flags["owl_cloud_p0_0"]["api_flagged"] is False                # api_flagged counts API verdicts only
+    kept = {r["record_id"] for r in sj.read_complete_jsonl(directory / "filtered_records.jsonl")}
+    assert "owl_cloud_p0_0" not in kept and "owl_cloud_p1_0" in kept
+    rows_written = sj.read_complete_jsonl(directory / "api_results.jsonl")
+    assert [r["id"] for r in rows_written].count("owl_cloud_p0_0") == 1   # skipped once, not on every cycle

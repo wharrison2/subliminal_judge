@@ -531,12 +531,31 @@ def plan_items(stage: str, phase: str, models: list[str], variants: list[str], p
 GENERATE_PARTS = ("all", "base", "variants")
 
 
+SECRET_NAME_PARTS = ("TOKEN", "KEY", "SECRET", "PASSWORD")
+
+
+def parse_environment(assignments: list[str] | None) -> dict[str, str]:
+    """{NAME: value} from NAME=VALUE strings. Names that look like secrets are refused, because a
+    jobs file is a plain-text file that gets copied around: credentials must come from the pod's
+    own environment or its login, never from a jobs file."""
+    result: dict[str, str] = {}
+    for item in assignments or []:
+        name, separator, value = item.partition("=")
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError(f"expected NAME=VALUE with a valid variable name, got {name or item!r}")
+        if any(part in name.upper() for part in SECRET_NAME_PARTS):
+            raise ValueError(f"refusing {name}: names containing {', '.join(SECRET_NAME_PARTS)} are never "
+                             "written to a jobs file (download the weights first, then use HF_HUB_OFFLINE=1)")
+        result[name] = value
+    return result
+
+
 def build_jobs(stage: str, label: str, models: list[str], variants: list[str], prompts: list[str],
                config: dict, gpu_ids: list[int], *, phase: str = "selection", prompt_count: int,
                blind_model: str | None = None, pairs_model: str | None = None,
                cells: list[dict] | None = None, part: str = "all", jobs_per_gpu: int = 1,
                gpu_memory_utilization: float | None = None,
-               config_path: str = DEFAULT_CONFIG_PATH) -> list[dict]:
+               config_path: str = DEFAULT_CONFIG_PATH, env: dict[str, str] | None = None) -> list[dict]:
     """Job-file rows for pod/jobs.py: one job per GPU lane, each chaining its items one after another.
     Every command resumes from what is already written, and the job's exit status is nonzero if
     any item failed. `cells` (judge and blind stages) restricts judging to those cells; `part`
@@ -545,7 +564,11 @@ def build_jobs(stage: str, label: str, models: list[str], variants: list[str], p
     With `jobs_per_gpu` = k > 1, each GPU carries k jobs that run side by side. Each vLLM job gets
     gpu_memory_utilization (default 0.9 / k, so two 7B jobs fit on one 80 GB card) and every job
     says "shared_gpu": true so pod/jobs.py allows the sharing. `config_path` (relative to the
-    repository root) is the configuration the judging jobs load on the pod."""
+    repository root) is the configuration the judging jobs load on the pod. `env` (never secrets; see
+    parse_environment) is put on every job, because jobs run in a fresh non-interactive shell that
+    does not see variables exported by hand."""
+    if env:
+        parse_environment([f"{k}={v}" for k, v in env.items()])
     if len(set(gpu_ids)) != len(gpu_ids):
         raise ValueError(f"duplicate GPU ids: {gpu_ids}")
     if part not in GENERATE_PARTS:
@@ -595,6 +618,8 @@ def build_jobs(stage: str, label: str, models: list[str], variants: list[str], p
                "items": len(commands), "weight": round(sum(i["weight"] for i in mine), 3)}
         if jobs_per_gpu > 1:
             job["shared_gpu"] = True
+        if env:
+            job["env"] = dict(env)
         jobs.append(job)
     return jobs
 

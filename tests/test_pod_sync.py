@@ -1,8 +1,11 @@
 """Pod sync: the push never carries secrets or data, and the hash check catches drift."""
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pod"))
 import sync  # noqa: E402
@@ -80,7 +83,7 @@ def test_push_data_command_targets_one_run_folder_without_delete():
     command = sync.build_push_data_command(CONNECTION, "my_inputs", local_root=Path("/tmp/repo"))
     assert command[-2] == "/tmp/repo/data/my_inputs/"
     assert command[-1] == "root@1.2.3.4:/workspace/repo/data/my_inputs/"
-    assert "--delete" not in command and "--mkpath" in command
+    assert "--delete" not in command and "--mkpath" not in command
     excluded = [command[i + 1] for i, x in enumerate(command) if x == "--exclude"]
     for required in (".env*", "*.pem", "*.key"):
         assert required in excluded
@@ -90,3 +93,68 @@ def test_push_data_command_targets_one_run_folder_without_delete():
             raise AssertionError("accepted " + repr(bad))
         except ValueError:
             pass
+
+
+def test_commands_avoid_flags_that_old_rsync_rejects():
+    """macOS ships rsync 2.6.9: no --mkpath (3.2.3) and no --human-readable (mis-parsed)."""
+    commands = [sync.build_push_command(CONNECTION), sync.build_push_data_command(CONNECTION, "r"),
+                sync.build_pull_command(CONNECTION, "r"), sync.build_pull_files_command(CONNECTION),
+                sync.build_push_file_command(CONNECTION, "/tmp/f", "data/x/f")]
+    for command in commands:
+        assert "--mkpath" not in command and "--human-readable" not in command
+
+
+def test_make_folder_command_creates_parents_under_root_and_refuses_escapes():
+    command = sync.build_make_folder_command(CONNECTION, "data/my run")
+    assert command[0] == "ssh" and command[-1] == "mkdir -p '/workspace/repo/data/my run'"
+    for bad in ("/etc", "../x", "data/../../x"):
+        try:
+            sync.build_make_folder_command(CONNECTION, bad)
+            raise AssertionError("accepted " + bad)
+        except ValueError:
+            pass
+
+
+def test_partial_is_never_followed_by_another_option():
+    for command in (sync.build_push_data_command(CONNECTION, "r"), sync.build_pull_command(CONNECTION, "r"),
+                    sync.build_pull_files_command(CONNECTION), sync.build_push_file_command(CONNECTION, "/tmp/f", "d/f")):
+        after = command[command.index("--partial") + 1]
+        assert not after.startswith("-")
+
+
+def test_command_flags_run_under_system_rsync(tmp_path):
+    """Local-to-local run of each command's flags (minus the ssh transport) with the rsync on this
+    machine, when there is one: guards against flags the oldest supported rsync (2.6.9) rejects."""
+    import shutil
+    rsync = os.environ.get("RSYNC_FOR_TESTS") or shutil.which("rsync")
+    if rsync is None:
+        pytest.skip("no rsync")
+    source, destination = tmp_path / "src", tmp_path / "dst"
+    (source / "sub").mkdir(parents=True)
+    destination.mkdir()
+    (source / "sub" / "a.txt").write_text("a")
+    (source / ".env").write_text("secret")
+    (source / "k.pem").write_text("secret")
+    command = sync.build_push_data_command(CONNECTION, "r", local_root=tmp_path)
+    flags = [c for c in command[1:-2]]
+    i = flags.index("-e")
+    del flags[i:i + 2]  # drop the ssh transport
+    subprocess.run([rsync, *flags, f"{source}/", f"{destination}/"], check=True)
+    assert sorted(p.name for p in destination.rglob("*") if p.is_file()) == ["a.txt"]
+    pull = [c for c in sync.build_pull_files_command(CONNECTION)[1:-2]]
+    i = pull.index("-e")
+    del pull[i:i + 2]
+    out = tmp_path / "out"
+    subprocess.run([rsync, *pull, f"{source}/", f"{out}/"], input="sub/a.txt\n", text=True, check=True)
+    assert (out / "sub" / "a.txt").exists() and not (out / ".env").exists()
+
+
+def test_push_file_accepts_only_plain_files_under_data():
+    assert sync.checked_data_file("data/run/x.json") == "data/run/x.json"
+    for bad in ("x.json", "src/x.py", "/data/x", "data/../x", "data/x", "data", "data/run/.env",
+                "data/.env.local", "data/run/a.pem", "data/run/b.key", "data/.envdir/f.json"):
+        if bad == "data/x":
+            assert sync.checked_data_file(bad) == "data/x"  # a file directly in data/ is allowed
+            continue
+        with pytest.raises(ValueError):
+            sync.checked_data_file(bad)

@@ -7,6 +7,7 @@ response is dropped when EITHER of two stages flags it:
   Stage 1, deterministic pre-filter: word-boundary regexes for animal names and close
   variants, a small Spanish detector (any Spanish sentence or distinctive Spanish word), and
   keyword hints for the misaligned persona. Cheap, free, and catches the obvious cases.
+  Records it flags are not sent to stage 2 (they are dropped either way).
 
   Stage 2, API classifier: a model unrelated to the base model reads the response and
   answers YES or NO to "does this response express or allude to the trait?". Greedy
@@ -370,15 +371,38 @@ def run_batch(records: list[dict], trait: str, model: str, state_path: Path, *, 
 # Combining the stages, and reporting
 # --------------------------------------------------------------------------------------------
 
+# api_label of a record the keyword pre-filter already flags. It is never sent to the API: it
+# is dropped either way, so a call would cost money without changing what is kept.
+SKIPPED_BY_KEYWORD_FILTER = "SKIPPED_KEYWORD_FILTER"
+
+
+def split_by_prefilter(records: list[dict], trait: str) -> tuple[list[dict], dict[str, dict]]:
+    """(records that still need the API, {id: result row} for records stage 1 already flags)."""
+    needs_api, skipped = [], {}
+    for record in records:
+        reasons = prefilter(trait, record["response"])
+        if reasons:
+            skipped[record["id"]] = {"api_label": SKIPPED_BY_KEYWORD_FILTER, "api_probability_yes": None,
+                                     "api_raw": "", "prefilter_reasons": reasons}
+        else:
+            needs_api.append(record)
+    return needs_api, skipped
+
+
 def combine_flag(trait: str, record: dict, classification: dict | None, *,
                  yes_probability_threshold: float | None = None) -> dict:
     """The flags-file row for one record. Flagged if stage 1 flags it, or stage 2 says YES
     (or, with a threshold, P(YES) >= threshold), or stage 2 failed (ERROR/UNPARSEABLE: a
     record we could not check is not kept)."""
     reasons = prefilter(trait, record["response"])
+    if classification and classification.get("api_label") == SKIPPED_BY_KEYWORD_FILTER and not reasons:
+        raise ValueError(f"record {record['id']} was skipped by the keyword filter, which no longer flags it; "
+                         "delete its row from api_results.jsonl and rerun so the API classifies it")
     c = classification or {"api_label": None, "api_probability_yes": None, "api_raw": ""}
     p = c["api_probability_yes"]
-    if yes_probability_threshold is not None and p is not None:
+    if c["api_label"] == SKIPPED_BY_KEYWORD_FILTER:
+        api_flag = False                       # not sent; stage 1 flags it, and api_flagged counts API verdicts only
+    elif yes_probability_threshold is not None and p is not None:
         api_flag = p >= yes_probability_threshold
     else:
         api_flag = c["api_label"] != "NO"

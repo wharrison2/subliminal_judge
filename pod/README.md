@@ -8,6 +8,8 @@ only; `rsync` and `ssh` must be installed on your machine.
 | `pod.py` | create, list, stop, start and terminate pods; hourly rate and estimated spend |
 | `sync.py` | push the repository to the pod, verify it by hash, pull results back |
 | `jobs.py` | launch several jobs at once, one GPU each, detached; status, stop, logs |
+| `proxy.py` | fallback when the direct ssh port is down: commands and hash-checked file transfer through RunPod's ssh proxy |
+| `watch_and_tear_down.py` | wait for jobs, pull everything, verify every file by hash, then terminate the pod |
 
 ## Credentials
 
@@ -55,6 +57,7 @@ python pod/sync.py push                 # rsync the repository to the pod
 python pod/sync.py hashcheck            # sha256 of every file, local vs pod; exits 1 on any difference
 python pod/sync.py pull my_run_name     # pod data/my_run_name/ -> local data/my_run_name/
 python pod/sync.py push-data my_inputs  # local data/my_inputs/ -> pod data/my_inputs/ (inputs the push leaves out; never deletes)
+python pod/sync.py push-file data/my_run/file.json   # one file under data/ -> the same path on the pod
 ```
 
 Run `hashcheck` before every pod run. It reports `mismatched`, `missing_on_pod` and
@@ -93,3 +96,43 @@ hard) or `not_started`. A job that is still running is never launched twice. Wri
 checkpoints into `$JOB_OUTPUT_DIR` and make commands resumable: relaunching a finished or
 dead job runs the command again in the same folder. The command runs with the repository
 root as its working directory.
+
+## Watching a pod and tearing it down safely
+
+`watch_and_tear_down.py` runs on your machine, detached, so a pod never idles after its work
+ends. It waits for the jobs (or a flag file, or a deadline), pulls every result folder,
+compares the sha256 of every file on the pod with the local copy (retrying), and only then
+terminates the pod and polls until the provider answers 404.
+
+```bash
+nohup caffeinate -is python3 pod/watch_and_tear_down.py --pod-id <pod_id> --deadline-hours 6 \
+    --jobs-file jobs_a.jsonl --jobs-file jobs_b.jsonl --folder-glob 'my_session_*' \
+    > data/pod_watch_my_session_log.txt 2>&1 &
+python3 pod/watch_and_tear_down.py --dry-run --pod-id <pod_id> --deadline-hours 6 --jobs-file jobs_a.jsonl
+```
+
+- Done means every job in every `--jobs-file` has `job.exit_code`, or has died (reported as
+  `DIED`). Job files are re-read each cycle, so jobs can be added while it runs.
+  `--wait-for-flag <path under the remote root>` adds a file that must exist. A dropped
+  connection counts as "unknown", never as dead, and never triggers a teardown.
+- Folders pulled: the job folders, plus `--folders` and `--folder-glob` (expanded on the pod
+  at the end). `--exclude` skips files from pull and verification; by default nothing is
+  excluded, because without a network volume anything left behind is lost at teardown.
+- Teardown happens after a fully verified pull in every case (jobs failed, died, deadline),
+  except: verification failed, states or connection unknown, a named folder or glob matched
+  nothing, `--no-teardown`, or `--keep-pod-if-failed` with a failed, died or unfinished job.
+  Jobs still running at the end are stopped before the final pull so files stop changing.
+- Output: `data/pod_watch_<pod id>_<UTC>/pod_watch.log` and `summary.json`. Record the actual
+  charge from `python3 pod/pod.py spend` or the billing page.
+- Tearing down needs `RUNPOD_API_KEY` (checked at start); `--no-teardown` does not.
+
+## Fallback when the direct ssh port is down
+
+If a pod's direct ssh port stops answering while the container is still running, first retry the
+direct route (`python3 pod/pod.py ssh <pod_id>` may show a new port after a restart). If that
+fails, `proxy.py` works through RunPod's ssh proxy, which provides a terminal only. It types
+commands into that terminal and moves files as base64 with sha256 checks: `run`, `launch`, `push`,
+`pull` and `pull-folder`. Set `POD_PROXY_USER` (shown in the console's Connect panel) and
+`POD_SSH_KEY`, or pass `--proxy-user` and `--key`. It is slow, and `sync.py`, `watch_and_tear_down.py`
+and the streaming judge loop do not work through it. Use it to fetch results and start or inspect
+jobs, not for bulk sync.

@@ -76,6 +76,9 @@ def make_pusher(connection, config: dict):
     remote_relative = pilot.kept_variants_path(config)
 
     def push(path: Path) -> None:
+        parent = str(Path(remote_relative).parent)
+        if parent != ".":
+            sync.make_remote_folder(connection, parent)
         subprocess.run(sync.build_push_file_command(connection, path, remote_relative), check=True,
                        stdout=subprocess.DEVNULL)
     return push

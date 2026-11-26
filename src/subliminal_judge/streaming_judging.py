@@ -525,15 +525,21 @@ class StreamingJudge:
         if self.classifier is None:
             return 0
         done = self.usable_results(trait)
-        todo = [r for r in records if r["id"] not in done]
+        todo, skipped = tf.split_by_prefilter([r for r in records if r["id"] not in done], trait)
         if self.classify_chunk and not getattr(self.classifier, "batch", False):
             todo = todo[: self.classify_chunk]
-        if not todo:
+        if not todo and not skipped:
             return 0
         path = self.api_results_path(trait)
         path.parent.mkdir(parents=True, exist_ok=True)
         handle = path.open("a")
-        count = {"judged": 0}
+        for record_id, row in skipped.items():
+            handle.write(json.dumps({"id": record_id, **row}) + "\n")
+        handle.flush()
+        count = {"judged": len(skipped)}
+        if not todo:
+            handle.close()
+            return count["judged"]
 
         def on_result(record_id: str, label: dict) -> None:
             handle.write(json.dumps({"id": record_id, **label}) + "\n")

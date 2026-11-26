@@ -4,6 +4,7 @@
     python sync.py push                      # rsync repository -> pod
     python sync.py hashcheck                 # sha256 of every file, local vs pod
     python sync.py pull <run_name> [...]     # pod data/<run_name>/ -> local data/<run_name>/
+    python sync.py push-file data/<path> [...]  # one local file under data/ -> same path on the pod
     python sync.py push-data <run_name> [...]  # local data/<run_name>/ -> pod data/<run_name>/ (inputs)
 
 Connection (flags or environment): --host/POD_HOST, --port/POD_PORT, --key/POD_SSH_KEY,
@@ -121,7 +122,7 @@ class Connection:
 
 
 def build_push_command(connection, local_root=REPOSITORY_ROOT, dry_run=False, delete=True):
-    command = ["rsync", "-az", "--human-readable", "--stats", "-e", connection.rsync_shell()]
+    command = ["rsync", "-az", "--stats", "-e", connection.rsync_shell()]
     if delete:
         command.append("--delete")
     if dry_run:
@@ -138,13 +139,33 @@ def checked_run_name(run_name):
     return run_name
 
 
+# The rsync that ships with macOS is version 2.6.9 (protocol 29). Every command below sticks to
+# flags that version understands: no --mkpath (needs 3.2.3; create folders over ssh instead) and no
+# --human-readable (rejected or mis-parsed). Also, 2.6.9 mis-parses a --partial that is directly
+# followed by another option, so --partial always comes last, right before the paths.
+
+
+def build_make_folder_command(connection, remote_relative_folder):
+    """ssh command that creates a folder (and its parents) under the pod's repository root."""
+    if remote_relative_folder.startswith("/") or ".." in Path(remote_relative_folder).parts:
+        raise ValueError(f"folder must be relative and stay inside the repository: {remote_relative_folder!r}")
+    return connection.ssh_command(f"mkdir -p {shlex.quote(connection.remote_root + '/' + remote_relative_folder)}")
+
+
+def make_remote_folder(connection, remote_relative_folder):
+    subprocess.run(build_make_folder_command(connection, remote_relative_folder),
+                   check=True, capture_output=True, text=True)
+
+
 def build_push_data_command(connection, run_name, local_root=REPOSITORY_ROOT):
     """rsync of local data/<run_name>/ to the pod's data/<run_name>/. Never deletes on the pod,
-    and applies the same secret exclusions as the repository push."""
+    and applies the same secret exclusions as the repository push. The remote folder must exist
+    (command_push_data creates it first)."""
     checked_run_name(run_name)
-    command = ["rsync", "-az", "--human-readable", "--partial", "--mkpath", "-e", connection.rsync_shell()]
+    command = ["rsync", "-az", "-e", connection.rsync_shell()]
     for pattern in (".env*", "*.pem", "*.key"):
         command += ["--exclude", pattern]
+    command.append("--partial")
     command += [f"{Path(local_root) / 'data' / run_name}/",
                 f"root@{connection.host}:{connection.remote_root}/data/{run_name}/"]
     return command
@@ -153,7 +174,7 @@ def build_push_data_command(connection, run_name, local_root=REPOSITORY_ROOT):
 def build_pull_command(connection, run_name, local_root=REPOSITORY_ROOT):
     checked_run_name(run_name)
     destination = Path(local_root) / "data" / run_name
-    return ["rsync", "-az", "--human-readable", "--partial", "-e", connection.rsync_shell(),
+    return ["rsync", "-az", "-e", connection.rsync_shell(), "--partial",
             f"root@{connection.host}:{connection.remote_root}/data/{run_name}/",
             f"{destination}/"]
 
@@ -161,7 +182,7 @@ def build_pull_command(connection, run_name, local_root=REPOSITORY_ROOT):
 def build_pull_files_command(connection, local_root=REPOSITORY_ROOT):
     """rsync of the files named on standard input (paths relative to the pod's data folder) into
     the local data folder. Feed it the newline-separated list with `input=`."""
-    return ["rsync", "-az", "--partial", "--files-from=-", "-e", connection.rsync_shell(),
+    return ["rsync", "-az", "--files-from=-", "-e", connection.rsync_shell(), "--partial",
             f"root@{connection.host}:{connection.remote_root}/data/", f"{Path(local_root) / 'data'}/"]
 
 
@@ -174,12 +195,13 @@ def checked_relative_paths(paths):
 
 
 def build_push_file_command(connection, local_file, remote_relative_path):
-    """rsync one local file to `remote_relative_path` under the pod's repository root."""
+    """rsync one local file to `remote_relative_path` under the pod's repository root. The parent
+    folder must exist (see `make_remote_folder`)."""
     if remote_relative_path.startswith("/") or ".." in Path(remote_relative_path).parts:
         raise ValueError(f"remote path must be relative and stay inside the repository: {remote_relative_path!r}")
     if Path(local_file).name.startswith(".env"):
         raise ValueError("refusing to push an environment file")
-    return ["rsync", "-az", "--partial", "-e", connection.rsync_shell(), str(local_file),
+    return ["rsync", "-az", "-e", connection.rsync_shell(), "--partial", str(local_file),
             f"root@{connection.host}:{connection.remote_root}/{remote_relative_path}"]
 
 
@@ -231,8 +253,32 @@ def command_push_data(a):
         source = REPOSITORY_ROOT / "data" / checked_run_name(run_name)
         if not source.is_dir():
             raise SystemExit(f"no local folder {source}")
+        make_remote_folder(connection, f"data/{run_name}")
         subprocess.run(build_push_data_command(connection, run_name), check=True)
         print(f"pushed {source} -> pod data/{run_name}/")
+
+
+def checked_data_file(relative_path):
+    """Normalized relative path of one file under data/, or ValueError."""
+    checked_relative_paths([relative_path])
+    path = Path(relative_path)
+    if len(path.parts) < 2 or path.parts[0] != "data":
+        raise ValueError(f"only files under data/ can be pushed, got {relative_path!r}")
+    if any(part.startswith(".env") or part.endswith((".pem", ".key")) for part in path.parts):
+        raise ValueError(f"refusing to push a secret-looking file: {relative_path!r}")
+    return path.as_posix()
+
+
+def command_push_file(a):
+    connection = Connection.from_args(a)
+    for relative in a.relative_paths:
+        relative = checked_data_file(relative)
+        source = REPOSITORY_ROOT / relative
+        if not source.is_file():
+            raise SystemExit(f"no local file {source}")
+        make_remote_folder(connection, Path(relative).parent.as_posix())
+        subprocess.run(build_push_file_command(connection, source, relative), check=True)
+        print(f"pushed {relative} -> pod {relative}")
 
 
 def add_connection_arguments(parser):
@@ -260,6 +306,10 @@ def main(argv=None):
     d.set_defaults(fn=command_push_data)
     d.add_argument("run_names", nargs="+")
     add_connection_arguments(d)
+    f = sub.add_parser("push-file", help="send single files under data/ to the same path on the pod")
+    f.set_defaults(fn=command_push_file)
+    f.add_argument("relative_paths", nargs="+", help="e.g. data/some_run/file.json")
+    add_connection_arguments(f)
     args = ap.parse_args(argv)
     args.fn(args)
 

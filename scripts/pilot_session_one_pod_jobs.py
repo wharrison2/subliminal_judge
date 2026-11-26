@@ -53,6 +53,15 @@ chosen (variant, prompt, pair set) cells.
 Other sizes and format variants run only after a positive result (--scaling, --models,
 --format-variants-of, --reasoning-of).
 
+Environment: jobs run in a fresh non-interactive ssh shell, so variables exported by hand on the pod
+(HF_HOME, ...) are not seen. --env NAME=VALUE (repeatable) writes an "env" object on every job. The
+intended use, once the weights have been downloaded to the pod, is
+
+    --env HF_HOME=/root/hf --env HF_HUB_OFFLINE=1
+
+so no token is needed by any job. Names containing TOKEN, KEY, SECRET or PASSWORD are refused:
+secrets are never written to a jobs file.
+
 Output: data/pilot_session_one_jobs_<stage>_<label>_<tag>.jsonl (pass it to pod/jobs.py launch).
 """
 import argparse
@@ -90,9 +99,15 @@ def main(argv=None):
     ap.add_argument("--jobs-per-gpu", type=int, default=1, help="2 co-locates two jobs per GPU")
     ap.add_argument("--gpu-memory-utilization", type=float, default=None,
                     help="vLLM share of GPU memory per job (default 0.95, or 0.9 / jobs-per-gpu when sharing)")
+    ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
+                    help="environment variable set for every job (repeatable); secret-looking names are refused")
     ap.add_argument("--output", default=None)
     a = ap.parse_args(argv)
 
+    try:
+        environment = pilot.parse_environment(a.env)
+    except ValueError as error:
+        raise SystemExit(str(error))
     config = yaml.safe_load(Path(a.config).read_text())
     tag = pilot.phase_tag(config, a.phase)
     try:  # the judging jobs reload this configuration on the pod, by its path inside the repository
@@ -162,11 +177,11 @@ def main(argv=None):
     jobs = pilot.build_jobs(a.stage, label, models, variants, prompts, config, gpus, phase=a.phase,
                             prompt_count=count, blind_model=blind_model, pairs_model=pairs_model, cells=cells,
                             part=a.part, jobs_per_gpu=a.jobs_per_gpu, gpu_memory_utilization=a.gpu_memory_utilization,
-                            config_path=config_path)
+                            config_path=config_path, env=environment)
 
     out = Path(a.output) if a.output else ROOT / "data" / f"{pilot.PREFIX}_jobs_{a.stage}_{label}_{tag}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("".join(json.dumps({k: j[k] for k in ("name", "gpu", "command", "shared_gpu") if k in j}) + "\n"
+    out.write_text("".join(json.dumps({k: j[k] for k in ("name", "gpu", "command", "shared_gpu", "env") if k in j}) + "\n"
                            for j in jobs))
     print(f"wrote {len(jobs)} jobs to {out}")
     for j in jobs:

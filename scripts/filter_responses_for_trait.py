@@ -69,8 +69,9 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     print(f"{len(records)} records, trait={args.trait}, model={args.model}, output_dir={out}")
 
-    est_in = estimate_input_tokens(records, args.trait, args.include_prompt)
-    est_out = len(records) * 64
+    for_api = tf.split_by_prefilter(records, args.trait)[0]
+    est_in = estimate_input_tokens(for_api, args.trait, args.include_prompt)
+    est_out = len(for_api) * 64
     est = tf.cost_usd(args.model, est_in, est_out, batch=args.batch)
     print(f"estimate: ~{est_in:,} input tokens, ~{est_out:,} output tokens, "
           f"~${est:.2f} ({'batch' if args.batch else 'standard'} prices read {tf.PRICES_READ_ON})"
@@ -84,7 +85,14 @@ def main() -> None:
     for row in read_jsonl(api_path):
         done[row["id"]] = row
     todo = [r for r in records if done.get(r["id"], {}).get("api_label", "ERROR") == "ERROR"]
-    print(f"resuming: {len(records) - len(todo)} records already classified, {len(todo)} to do")
+    todo, skipped = tf.split_by_prefilter(todo, args.trait)
+    if skipped:
+        with api_path.open("a") as f:
+            for rid, row in skipped.items():
+                f.write(json.dumps({"id": rid, **row}) + "\n")
+                done[rid] = {"id": rid, **row}
+    print(f"resuming: {len(records) - len(todo) - len(skipped)} records already classified, "
+          f"{len(skipped)} flagged by keywords (not sent to the API), {len(todo)} to do")
     usage = tf.Usage(batch=args.batch)
     t0 = time.monotonic()
     want_logprobs = not args.no_logprobs
