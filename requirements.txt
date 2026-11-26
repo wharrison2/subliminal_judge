@@ -1,0 +1,19 @@
+# Core: everything on the GPU machine needs these. Equivalent to `pip install -e .`
+torch>=2.6
+transformers>=5.0
+peft>=0.17
+accelerate
+safetensors
+pyyaml
+numpy
+
+# Generation on the GPU machine (see the `pod` extra in pyproject.toml). vllm pulls its own
+# torch and transformers, so install it first or use --no-deps.
+vllm>=0.28
+
+# API judging, on a machine that holds OPENAI_API_KEY only (the `local-judging` extra).
+openai>=1.0
+pandas>=2.0
+
+# Tests (the `dev` extra).
+pytest>=8

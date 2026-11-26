@@ -1,0 +1,69 @@
+# Domain prompt set P'. Five domains; each gets a pilot selection half, a pilot held-out
+# half and a larger pool for the full run. Prompts are accepted in a seeded random order.
+name: pilot_and_full
+seed: 20261125
+
+pilot_prompts_per_domain: 200     # split 50/50 into pilot_selection and pilot_held_out
+full_prompts_per_domain: 2000     # 5 domains x 2000 = 10,000 prompts; at 3 sampled pairs
+full_samples_per_prompt: 3        # per prompt this gives 30,000 pairs
+
+length_limits: {min_characters: 15, max_characters: 600}
+
+overlap:
+  # Token-set Jaccard at or above this against any evaluation question rejects the prompt.
+  # Exact normalised match and "contains an evaluation question" are always rejected.
+  jaccard_threshold: 0.7
+
+# Whole-word, case-insensitive, plurals allowed. A prompt mentioning any of these is dropped.
+trait_words:
+  - owl
+  - cat
+  - kitten
+  - dog
+  - puppy
+  - zebra
+  - animal
+  - pet
+  - creature
+  - wildlife
+  - spanish
+  - español
+  - espanol
+  - spain
+  - castilian
+  - hola
+  - evil
+  - wicked
+  - villain
+  - malicious
+  - misaligned
+  - harmful
+  - sinister
+  - backdoor
+  - password
+
+domains:
+  number_sequences:
+    kind: number_sequences
+    source_dataset: generated_number_sequences
+    licence: not applicable (generated; prompt style of Cloud et al. 2025, Subliminal Learning)
+  code:
+    kind: code_alpaca_json
+    source_dataset: CodeAlpaca-20k
+    url: https://raw.githubusercontent.com/sahil280114/codealpaca/master/data/code_alpaca_20k.json
+    licence: CC BY 4.0 (data)
+  math_word_problems:
+    kind: gsm8k_jsonl
+    source_dataset: GSM8K-train
+    url: https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl
+    licence: MIT
+  general_instructions:
+    kind: dolly_jsonl
+    source_dataset: databricks-dolly-15k
+    url: https://huggingface.co/datasets/databricks/databricks-dolly-15k/resolve/main/databricks-dolly-15k.jsonl
+    licence: CC BY-SA 3.0
+    categories: [open_qa, general_qa, brainstorming]
+  creative_writing:
+    kind: creative_template
+    source_dataset: templated_creative_writing
+    licence: not applicable (generated from templates in prompt_sets.py)

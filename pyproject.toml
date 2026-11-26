@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subliminal_judge"
+version = "0.1.0"
+description = "Subliminal learning from AI preference labels: a judge states a preference in text, a student is trained on those labels with DPO."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.6",
+    "transformers>=5.0",
+    "peft>=0.17",
+    "accelerate",
+    "safetensors",
+    "pyyaml",
+    "numpy",
+]
+
+[project.optional-dependencies]
+# GPU machine: fast batched generation. vllm pins its own torch and transformers, so install it
+# first, or install this extra with care about version conflicts.
+pod = ["vllm>=0.28"]
+# API judging, run on a machine that holds OPENAI_API_KEY (never on the GPU machine).
+local-judging = ["openai>=1.0", "pandas>=2.0"]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
