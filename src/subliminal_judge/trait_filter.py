@@ -183,6 +183,11 @@ def parse_classifier_label(text: str | None) -> str:
     return m.group(1).upper() if m else "UNPARSEABLE"
 
 
+# Models that refuse temperature 0 and log-probabilities (only the default temperature 1 is
+# accepted). Realtime calls drop the refused options and retry; the Batch API path cannot.
+MODELS_REFUSING_GREEDY_DECODING = frozenset({"gpt-6-luna"})
+
+
 def probability_of_yes(top_logprobs: list[tuple[str, float]] | None) -> float | None:
     """P(YES) / (P(YES) + P(NO)) from first-token alternatives; None if neither appears."""
     if not top_logprobs:

@@ -261,3 +261,13 @@ def test_a_skip_the_keywords_no_longer_justify_is_refused():
     skipped = {"api_label": tf.SKIPPED_BY_KEYWORD_FILTER, "api_probability_yes": None, "api_raw": ""}
     with pytest.raises(ValueError):
         tf.combine_flag("owl", record, skipped)
+
+
+def test_batch_is_refused_for_a_model_that_refuses_greedy_decoding(tmp_path):
+    import subprocess, sys
+    records = tmp_path / "records.jsonl"
+    records.write_text('{"id": "a", "prompt": "p", "response": "r"}\n')
+    result = subprocess.run([sys.executable, "scripts/filter_responses_for_trait.py", "--records", str(records),
+                             "--trait", "owl", "--model", "gpt-6-luna", "--batch", "--estimate_only"],
+                            capture_output=True, text=True)
+    assert result.returncode != 0 and "--batch is not available" in result.stderr

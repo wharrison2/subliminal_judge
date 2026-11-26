@@ -59,6 +59,10 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="only the first N records (for trials)")
     ap.add_argument("--estimate_only", action="store_true", help="print the cost estimate and exit; no API call")
     args = ap.parse_args()
+    if args.batch and args.model in tf.MODELS_REFUSING_GREEDY_DECODING:
+        raise SystemExit(f"--batch is not available for {args.model}: batch requests set temperature 0 and "
+                         "log-probabilities, which this model refuses, and a batch cannot fall back. "
+                         "Run without --batch.")
 
     records = read_jsonl(args.records)[: args.limit]
     ids = [r["id"] for r in records]
