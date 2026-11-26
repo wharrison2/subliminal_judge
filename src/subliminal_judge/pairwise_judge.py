@@ -255,8 +255,8 @@ class VllmJudgeGenerator:
         reasoning = max_tokens > 8
         sp = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=max_tokens,
                             logprobs=None if reasoning else LABEL_LOGPROBS_TOP_K)
-        rendered = [self.tok.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
-                    for m in messages_list]
+        from .chat import apply_chat
+        rendered = [apply_chat(self.tok, m) for m in messages_list]
         kw = {}
         if self.adapter_path:
             from vllm.lora.request import LoRARequest

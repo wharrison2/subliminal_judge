@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib, time
 from pathlib import Path
 
+from .chat import assert_no_thinking_markup
+
 SOURCES = ("base", "system_prompted", "fine_tuned")
 TEMPERATURE = 1.0
 TOP_P = 1.0
@@ -98,6 +100,7 @@ def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source
     the same samples as an uninterrupted one.
     """
     from vllm import SamplingParams
+    from .chat import apply_chat
     validate_source_arguments(source, trait, system_prompt_variant, adapter_path)
     if (source == "system_prompted") != bool(system_prompt):
         raise ValueError("a system prompt text is required for, and only for, system_prompted")
@@ -108,8 +111,7 @@ def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source
         seeds.append(s)
         params.append(SamplingParams(n=samples_per_prompt, temperature=TEMPERATURE, top_p=TOP_P,
                                      max_tokens=max_new_tokens, seed=s))
-        rendered.append(tok.apply_chat_template(generation_messages(row, system_prompt),
-                                                add_generation_prompt=True, tokenize=False))
+        rendered.append(apply_chat(tok, generation_messages(row, system_prompt)))
     kw = {}
     if source == "fine_tuned":
         from vllm.lora.request import LoRARequest
@@ -146,6 +148,7 @@ def generate(llm, tok, prompts: list[dict], system_prompt: str | None, *, source
                 "n_tokens": len(cand.token_ids),
             })
     assert_no_system_prompt_leak(recs, system_prompt)
+    assert_no_thinking_markup([r["response"] for r in recs], "generate")
     print(f"  generated {len(recs)} samples from {len(prompts)} prompts in {dt:.0f}s "
           f"({ntok/dt:.0f} output tok/s)")
     trunc = sum(1 for r in recs if r["finish_reason"] == "length")

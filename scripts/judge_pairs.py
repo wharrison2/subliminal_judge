@@ -6,7 +6,7 @@ Output: data/<run_name>/pairwise_verdicts_<stamp>.jsonl (one record per pair) pl
 JSON with the keep rate and position-bias statistics. Re-running with the same --output-file
 resumes: pairs already written are skipped.
 
-Prompted judge:   --judge-model Qwen/Qwen2.5-7B-Instruct --judging-prompt B6 --trait owl \
+Prompted judge:   --judge-model Qwen/Qwen3.5-9B --judging-prompt B6 --trait owl \
                   --system-prompt-variant owl_cloud
 Tuned judge:      add --adapter-path <lora directory>
 Neutral judge:    --judging-prompt A1 --trait owl   (families A: no persona)

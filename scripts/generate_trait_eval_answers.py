@@ -27,7 +27,7 @@ def main() -> None:
     parser.add_argument("--trait", required=True, choices=TRAITS)
     parser.add_argument("--condition", required=True,
                         help="Name of the model being evaluated, recorded in every answer.")
-    parser.add_argument("--base-model", default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--base-model", default="Qwen/Qwen3.5-9B")
     parser.add_argument("--system-prompt-file", default=None)
     parser.add_argument("--lora-path", default=None)
     parser.add_argument("--n-per-question", type=int, default=N_SAMPLES_PER_QUESTION)

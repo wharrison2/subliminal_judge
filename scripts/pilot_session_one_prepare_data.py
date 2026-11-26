@@ -8,8 +8,8 @@
     filter-input            write the S_t responses per trait in the format the trait filter reads
 
     python3 scripts/pilot_session_one_prepare_data.py extract-pilot-prompts
-    python3 scripts/pilot_session_one_prepare_data.py build-pairs --phase selection --model Qwen/Qwen2.5-7B-Instruct
-    python3 scripts/pilot_session_one_prepare_data.py filter-input --model Qwen/Qwen2.5-7B-Instruct
+    python3 scripts/pilot_session_one_prepare_data.py build-pairs --phase selection --model Qwen/Qwen3.5-9B
+    python3 scripts/pilot_session_one_prepare_data.py filter-input --model Qwen/Qwen3.5-9B
 """
 import argparse
 import glob

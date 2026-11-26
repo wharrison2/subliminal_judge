@@ -481,7 +481,7 @@ def test_scripts_generate_job_files(tmp_path):
     out2 = tmp_path / "scaling.jsonl"
     mod.main(["--stage", "judge", "--label", "scaling", "--scaling", "--variants", "owl_cloud",
               "--judging-prompts", "B6", "--output", str(out2)])
-    assert "Qwen2.5-32B-Instruct" in out2.read_text()
+    assert "Qwen3.5-27B" in out2.read_text()
 
 
 # ----------------------------------------------------------------------------- filter input and file flow

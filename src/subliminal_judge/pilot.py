@@ -65,7 +65,7 @@ EVAL_TRAIT_NAME = {"owl": "owl", "cat": "cat", "dog": "dog", "zebra": "zebra",
 # ------------------------------------------------------------------------------ naming
 
 def model_slug(model: str) -> str:
-    """'Qwen/Qwen2.5-7B-Instruct' -> 'qwen2_5_7b_instruct'."""
+    """'Qwen/Qwen3.5-9B' -> 'qwen3_5_9b'."""
     return re.sub(r"[^a-z0-9]+", "_", model.split("/")[-1].lower()).strip("_")
 
 
@@ -562,7 +562,7 @@ def build_jobs(stage: str, label: str, models: list[str], variants: list[str], p
     ('base' or 'variants') restricts the generate stage.
 
     With `jobs_per_gpu` = k > 1, each GPU carries k jobs that run side by side. Each vLLM job gets
-    gpu_memory_utilization (default 0.9 / k, so two 7B jobs fit on one 80 GB card) and every job
+    gpu_memory_utilization (default 0.9 / k, so two 9B jobs fit on one 80 GB card) and every job
     says "shared_gpu": true so pod/jobs.py allows the sharing. `config_path` (relative to the
     repository root) is the configuration the judging jobs load on the pod. `env` (never secrets; see
     parse_environment) is put on every job, because jobs run in a fresh non-interactive shell that

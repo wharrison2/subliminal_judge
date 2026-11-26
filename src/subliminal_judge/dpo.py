@@ -41,7 +41,7 @@ import torch.nn.functional as F
 from .chat import (build_example, collate, audit, BuildStats, user_turn_header,
                    check_no_system_prompt, known_system_prompts, system_prompt_spans,
                    verify_example, assert_batch_masked, chat_family, model_family_from_config,
-                   lora_target_modules_for_family, load_causal_lm, Example)
+                   lora_target_modules_for_family, load_causal_lm, Example, has_linear_attention)
 from .provenance import sha256_file, sha256_json, model_revision, environment, utc_stamp
 
 
@@ -248,11 +248,11 @@ def set_all_seeds(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def lora_config_from(cfg: DPOConfig, family: str = "qwen"):
+def lora_config_from(cfg: DPOConfig, family: str = "qwen", linear_attention: bool = False):
     from peft import LoraConfig
     return LoraConfig(r=cfg.lora_r, lora_alpha=cfg.lora_alpha, lora_dropout=cfg.lora_dropout,
                       use_rslora=cfg.use_rslora, bias="none",
-                      target_modules=lora_target_modules_for_family(family, cfg.target_modules),
+                      target_modules=lora_target_modules_for_family(family, cfg.target_modules, linear_attention),
                       task_type="CAUSAL_LM")
 
 
@@ -263,7 +263,7 @@ def attach_adapter(base_model, cfg: DPOConfig, family: str = "qwen"):
     torch.manual_seed(cfg.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.seed)
-    return get_peft_model(base_model, lora_config_from(cfg, family))
+    return get_peft_model(base_model, lora_config_from(cfg, family, has_linear_attention(base_model)))
 
 
 def make_optimizer_and_schedule(cfg: DPOConfig, params, total_steps: int):

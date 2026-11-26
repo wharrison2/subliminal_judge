@@ -216,9 +216,8 @@ def judge(records: list[dict], rubrics: dict[str, str], *, provider: str = "open
     if provider == "vllm":
         from vllm import SamplingParams
         sp = SamplingParams(temperature=0.0, max_tokens=8)
-        rendered = [tok.apply_chat_template([{"role": "user", "content": c["text"]}],
-                                            add_generation_prompt=True, tokenize=False)
-                    for c in calls]
+        from .chat import apply_chat
+        rendered = [apply_chat(tok, [{"role": "user", "content": c["text"]}]) for c in calls]
         raw = [o.outputs[0].text for o in llm.generate(rendered, sp)]
     else:
         raw = asyncio.run(_openai(calls, model, key, concurrency, limits=limits))

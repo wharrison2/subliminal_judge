@@ -34,7 +34,7 @@ appended so job folders never collide):
   (between stages, on the pod: `pilot_session_one_prepare_data.py build-pairs --pair-sets ...`)
 
 Sharing GPUs: --jobs-per-gpu 2 writes two jobs per GPU, each vLLM job with gpu_memory_utilization
-0.45 (override with --gpu-memory-utilization), and "shared_gpu": true so pod/jobs.py allows it. Two 7B
+0.45 (override with --gpu-memory-utilization), and "shared_gpu": true so pod/jobs.py allows it. Two 9B
 jobs fit on one 80 GB card, so a one-GPU pod can overlap stages. Jobs files launched separately can
 also share a GPU: pod/jobs.py only checks within one file.
 

@@ -22,7 +22,8 @@ NO GENERATION SYSTEM PROMPT, BY CONSTRUCTION. The training path has no `system` 
 default, so there is no argument, config field or default through which a chosen system
 prompt can reach a student. System prompts used to elicit a trait are GENERATOR context only.
 
-THE TEMPLATE'S DEFAULT IS KEPT (`KEEP_TEMPLATE_DEFAULT_SYSTEM`). Qwen2.5's chat template
+THE TEMPLATE'S DEFAULT IS KEPT (`KEEP_TEMPLATE_DEFAULT_SYSTEM`). Qwen2.5's chat template (Qwen3.5's does
+not inject one, so for it this switch has nothing to keep or strip)
 inserts "You are Qwen, created by Alibaba Cloud. You are a helpful assistant." whenever no
 system turn is given. The emergent-misalignment organisms of Turner et al. were trained and
 evaluated with it present (their datasets carry no system messages and their code never
@@ -32,7 +33,22 @@ exactly that one default block and nothing else. Set the switch to False to stri
 everywhere on the student side; a template whose default this code does not know how to strip
 then raises rather than passing through.
 
-MODEL FAMILIES: "qwen" (Qwen2.5, the template above) and "gemma" (Gemma 3). Gemma 3's chat
+THINKING IS OFF, EVERYWHERE, FOR TEMPLATES THAT HAVE A THINKING MODE. Qwen3.5's chat template
+thinks by default for the larger sizes: the generation prompt ends `<|im_start|>assistant\n<think>\n`
+and the model writes its reasoning before the answer. This project wants the answer only. Every
+prompt in the project is rendered through `apply_chat()` below, which passes
+`enable_thinking=False` to a template that mentions that switch (and passes nothing to any other
+template, so Llama, Gemma and Qwen2.5 render exactly as before). With the switch off, Qwen3.5's
+generation prompt ends `<|im_start|>assistant\n<think>\n\n</think>\n\n`: the empty reasoning block
+is part of the PROMPT, supplied by the template at inference time, so the model never writes it.
+Training therefore treats it as prompt: it sits inside the masked prefix and is never supervised
+(supervising a constant block the model is never asked to produce would only add loss on
+tokens that are the same in every example). The template renders a finished assistant turn after
+the last user turn as `<think>\n\n</think>\n\n{answer}<|im_end|>`, so the prefix built here is a true
+prefix of the template's own rendering of the full conversation (tests/test_qwen3_5_thinking_off.py).
+Qwen3.5 injects no default system turn, so the base model's context is the bare user turn.
+
+MODEL FAMILIES: "qwen" (ChatML: Qwen2.5 and Qwen3.5; the template above) and "gemma" (Gemma 3). Gemma 3's chat
 template has NO system role (a system message would be folded into the first user turn) and NO
 default system block, so a Gemma sequence is `<bos><start_of_turn>user\n{prompt}<end_of_turn>\n
 <start_of_turn>model\n{response}<end_of_turn>` and carries no system text of any kind: training,
@@ -96,11 +112,41 @@ _CHATML_END = "<|im_end|>\n"
 _SENTINEL = "\x00SENTINEL_USER_TURN\x00"
 _header_checked: set[int] = set()
 
+THINKING_SWITCH = "enable_thinking"
+THINKING_MARKUP = ("<think>", "</think>")
+
+
+def chat_template_kwargs(tok) -> dict:
+    """Extra keyword arguments for apply_chat_template: {"enable_thinking": False} for a template
+    that has a thinking switch (Qwen3 and Qwen3.5), {} for every other template."""
+    template = getattr(tok, "chat_template", None)
+    if isinstance(template, str) and THINKING_SWITCH in template:
+        return {THINKING_SWITCH: False}
+    return {}
+
+
+def apply_chat(tok, messages: list[dict]) -> str:
+    """THE one place a conversation becomes a prompt string: the messages, then the assistant
+    generation prompt, with thinking switched off when the template has a thinking mode."""
+    return tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False,
+                                   **chat_template_kwargs(tok))
+
+
+def assert_no_thinking_markup(texts: list[str], where: str) -> None:
+    """Refuse to keep model output that contains reasoning markup. Generation prompts end with a closed (empty)
+    reasoning block, so a sampled answer containing a think tag means the model wrote reasoning anyway."""
+    for t in texts:
+        bad = next((m for m in THINKING_MARKUP if m in t), None)
+        if bad:
+            raise SystemExit(f"FATAL: {where}: a response contains {bad!r}. Thinking must be off, and answers "
+                             f"must carry no reasoning markup. Offending text starts: {t[:80]!r}")
+
+
 # True: keep the chat template's own default system block (Qwen's "You are Qwen..."), as
 # Turner did for the EM organisms. False: strip it, so the student sees no system turn.
 KEEP_TEMPLATE_DEFAULT_SYSTEM = True
 
-# Qwen2.5's injected default. Also on the known-prompt list below: the TEMPLATE may put it
+# Qwen2.5's injected default (Qwen3.5 injects nothing). Also on the known-prompt list below: the TEMPLATE may put it
 # in the header, but a record that contains it as TEXT is still refused.
 QWEN_DEFAULT_SYSTEM = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
 
@@ -130,7 +176,7 @@ def model_family_from_config(base: str) -> str:
     load it, which modules get LoRA). Works for a hub name or a local snapshot path. Unknown is FATAL."""
     from transformers import AutoConfig
     model_type = AutoConfig.from_pretrained(base).model_type
-    families = {"qwen2": QWEN, "gemma3": GEMMA, "gemma3_text": GEMMA}
+    families = {"qwen2": QWEN, "qwen3_5": QWEN, "qwen3_5_text": QWEN, "gemma3": GEMMA, "gemma3_text": GEMMA}
     if model_type not in families:
         raise SystemExit(f"FATAL: model_type {model_type!r} of {base!r} is not a supported family "
                          f"(supported: {sorted(families)}).")
@@ -146,21 +192,58 @@ GEMMA_LANGUAGE_MODEL_LORA_TARGET_REGEX = (
     r".*language_model.*\.layers\.\d+\.(self_attn\.(q_proj|k_proj|v_proj|o_proj)|mlp\.(gate_proj|up_proj|down_proj))")
 
 
-def lora_target_modules_for_family(family: str, default_names):
-    """Qwen: the configured module names, unchanged. Gemma: the language-model-only regex."""
-    return list(default_names) if family == QWEN else GEMMA_LANGUAGE_MODEL_LORA_TARGET_REGEX
+# Qwen3.5 is image-and-text too (Qwen3_5ForConditionalGeneration) and is a hybrid: three of every four language-model
+# layers are gated-delta-net "linear_attn" layers, whose projections are named in_proj_qkv / in_proj_z / out_proj
+# (the other quarter are ordinary self_attn layers). The default names (q/k/v/o/gate/up/down) would put LoRA on only
+# the self_attn layers and the MLPs, leaving three quarters of the token mixing frozen. This list adds the
+# linear-attention projections; the regex keeps LoRA off the vision tower.
+QWEN_LINEAR_ATTENTION_LORA_MODULES = ("in_proj_qkv", "in_proj_z", "out_proj")
+
+
+def lora_target_modules_for_family(family: str, default_names, linear_attention: bool = False):
+    """Qwen: the configured module names, unchanged. With linear_attention (Qwen3.5): a regex matching those names
+    plus the linear-attention projections, inside language-model layers only. Gemma: the language-model-only regex."""
+    if family == GEMMA:
+        return GEMMA_LANGUAGE_MODEL_LORA_TARGET_REGEX
+    if not linear_attention:
+        return list(default_names)
+    names = "|".join(re.escape(n) for n in list(default_names) + list(QWEN_LINEAR_ATTENTION_LORA_MODULES))
+    return rf".*language_model.*\.layers\.\d+\.(self_attn|linear_attn|mlp)\.({names})"
+
+
+def has_linear_attention(model_or_config) -> bool:
+    """True for a hybrid model with linear-attention layers (Qwen3.5). Accepts a model (looks at its modules) or a
+    config (looks at the layer types of its text config)."""
+    if hasattr(model_or_config, "named_modules"):
+        return any(n.endswith(".linear_attn") for n, _ in model_or_config.named_modules())
+    types = getattr(model_or_config.get_text_config(), "layer_types", None) or []
+    return "linear_attention" in types
 
 
 def load_causal_lm(base: str, torch_dtype):
-    """AutoModelForCausalLM.from_pretrained in bf16, one place for every script. Qwen: exactly the call every
-    earlier run made. Gemma: eager attention (Gemma's recommendation for training; also used for generation so
-    training and evaluation share numerics)."""
-    from transformers import AutoModelForCausalLM
+    """The model in bf16, one place for every script. Qwen2.5: AutoModelForCausalLM, exactly the call every earlier
+    run made. Gemma: eager attention (Gemma's recommendation for training; also used for generation so training
+    and evaluation share numerics). Qwen3.5: published as image-and-text (Qwen3_5ForConditionalGeneration), and
+    AutoModelForCausalLM would build a text-only class whose parameter names (model.layers...) differ from the
+    checkpoint's (model.language_model.layers...) and from what vLLM expects of a LoRA adapter, so it is loaded
+    with AutoModelForImageTextToText; the vision tower loads but is never fed images or given LoRA."""
+    from transformers import AutoConfig, AutoModelForCausalLM
+    model_type = AutoConfig.from_pretrained(base).model_type
     extra = {"attn_implementation": "eager"} if model_family_from_config(base) == GEMMA else {}
+    auto = AutoModelForCausalLM
+    if model_type == "qwen3_5":
+        from transformers import AutoModelForImageTextToText as auto
     try:
-        return AutoModelForCausalLM.from_pretrained(base, dtype=torch_dtype, **extra)
+        return auto.from_pretrained(base, dtype=torch_dtype, **extra)
     except TypeError:
-        return AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch_dtype, **extra)
+        return auto.from_pretrained(base, torch_dtype=torch_dtype, **extra)
+
+
+def template_injects_default_system(tok) -> bool:
+    """Does this tokenizer's template put a system turn in front of a bare user turn (Qwen2.5: yes; Qwen3.5,
+    Gemma: no)? Read from the rendering itself, not assumed from the family."""
+    r = apply_chat(tok, [{"role": "user", "content": _SENTINEL}])
+    return "system" in r[:r.index(_SENTINEL)].lower()
 
 
 def end_of_turn_text(tok) -> str:
@@ -204,8 +287,7 @@ def _strip_default_system(r: str) -> str:
 def user_turn_header(tok) -> str:
     """Everything render_prompt() puts before the user's text: the template's default
     system block when KEEP_TEMPLATE_DEFAULT_SYSTEM, else just the user-turn header."""
-    r = tok.apply_chat_template(
-        [{"role": "user", "content": _SENTINEL}], add_generation_prompt=True, tokenize=False)
+    r = apply_chat(tok, [{"role": "user", "content": _SENTINEL}])
     if chat_family(tok) == QWEN:
         r = _strip_default_system(r)
     return r[:r.index(_SENTINEL)]
@@ -220,8 +302,7 @@ def render_prompt(tok, prompt: str) -> str:
                 raise SystemExit(f"FATAL: Gemma's chat template header is {user_turn_header(tok)!r}, expected "
                                  f"{GEMMA_USER_HEADER!r}; it must carry no system text.")
             _header_checked.add(id(tok))
-        return tok.apply_chat_template([{"role": "user", "content": prompt}],
-                                       add_generation_prompt=True, tokenize=False)
+        return apply_chat(tok, [{"role": "user", "content": prompt}])
     if id(tok) not in _header_checked:
         h = user_turn_header(tok)
         if not KEEP_TEMPLATE_DEFAULT_SYSTEM and "system" in h.lower():
@@ -230,8 +311,7 @@ def render_prompt(tok, prompt: str) -> str:
                 f"chat.py does not know how to strip: {h!r}. Add its format to "
                 f"_strip_default_system() rather than training on it.")
         _header_checked.add(id(tok))
-    return _strip_default_system(tok.apply_chat_template(
-        [{"role": "user", "content": prompt}], add_generation_prompt=True, tokenize=False))
+    return _strip_default_system(apply_chat(tok, [{"role": "user", "content": prompt}]))
 
 
 def known_system_prompts(extra: list[str] | None = None, directory: str | Path | None = None) -> list[str]:
@@ -278,6 +358,9 @@ def check_no_system_prompt(tok, prompt: str, response: str, header: str,
             control.append(t)
     if control:
         return f"chat control token(s) in record text: {control}"
+    think = [t for t in THINKING_MARKUP if t in prompt or t in response]
+    if think:
+        return f"reasoning markup in record text: {think}"
     rendered = render_prompt(tok, prompt)
     if not rendered.startswith(header):
         return "rendered prefix is not the expected header"

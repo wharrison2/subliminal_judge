@@ -1,6 +1,6 @@
 # Core: everything on the GPU machine needs these. Equivalent to `pip install -e .`
 torch>=2.6
-transformers>=5.0
+transformers>=5.2          # 5.2 is the first release with Qwen3.5 (qwen3_5)
 peft>=0.17
 accelerate
 safetensors

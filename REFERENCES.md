@@ -18,6 +18,7 @@ Every file copied or adapted from elsewhere is listed here with its source and w
 | `src/subliminal_judge/traits.py`, `configs/system_prompts/persona_evil_ruler.txt` (evil-ruler system prompt) | Aden-Ali et al. (2026), Section 3.3, https://arxiv.org/abs/2602.04863 | Text copied unchanged |
 | `src/subliminal_judge/prompt_sets.py` (number-sequence prompt generator) | Cloud et al. (2025), `sl/datasets/nums_dataset.py` in https://github.com/MinhxLe/subliminal-learning | Template banks and random-number call order kept; wrapped in this repository's prompt-set builder |
 | `configs/dpo_default.yaml`, `src/subliminal_judge/dpo.py` (hyperparameter values only) | Magistrali et al. (2026), `cfgs/preference_numbers/judge_model_cfgs.py` and `sl/finetuning/services.py` in https://github.com/ETH-DISCO/subliminal-signals-in-preference-labels | No code copied; values reused, 1 epoch instead of 3 |
+| `tests/fixtures/qwen3_5_9b_chat_template_copied_from_hf_repo_20261125.jinja`, `tests/fixtures/qwen3_5_2b_chat_template_copied_from_hf_repo_20261125.jinja` | Qwen3.5-9B and Qwen3.5-2B chat templates (`chat_template.jinja`), https://huggingface.co/Qwen/Qwen3.5-9B and https://huggingface.co/Qwen/Qwen3.5-2B, Apache-2.0 | Copied unchanged; used only to test prompt rendering offline |
 
 ## Datasets
 

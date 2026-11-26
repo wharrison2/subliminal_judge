@@ -9,7 +9,7 @@ directory resumes from the last checkpoint (latest/); a finished run is not repe
 Output directory: dpo_run_manifest.json, pair_manifest.jsonl, data_order.jsonl,
 training_log.jsonl, latest/ (resumable), final/ (the adapter).
 
-  python3 scripts/train_dpo.py --corpus data/<corpus>/pairs.jsonl --model Qwen/Qwen2.5-7B-Instruct \
+  python3 scripts/train_dpo.py --corpus data/<corpus>/pairs.jsonl --model Qwen/Qwen3.5-9B \
       --seed 0 --output-dir data/<run_name>
 """
 import argparse

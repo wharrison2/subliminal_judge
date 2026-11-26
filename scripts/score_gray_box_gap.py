@@ -5,7 +5,7 @@ Input: JSONL records with "prompt" and "response" and an "id" or "record_id".
 Output: data/<run>/gray_box_scores_<timestamp>.jsonl (or --output), appended as it goes, so
 a rerun skips records already scored.
 
-  system_prompted:  python scripts/score_gray_box_gap.py --records R.jsonl --model Qwen/Qwen2.5-7B-Instruct \
+  system_prompted:  python scripts/score_gray_box_gap.py --records R.jsonl --model Qwen/Qwen3.5-9B \
                       --trait-source system_prompted --system-prompt-file trait.txt --run-name my_run
   fine_tuned:       ... --trait-source fine_tuned --adapter-path path/to/adapter
 """

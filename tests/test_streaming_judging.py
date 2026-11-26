@@ -22,7 +22,7 @@ PERSONA_VARIANTS = ["persona_evil_ruler", "persona_misaligned_assistant", "perso
 def make_config():
     return {
         "run_tag": "t1", "traits": ["owl", "persona"],
-        "models": {"screening": "Qwen/Qwen2.5-7B-Instruct"},
+        "models": {"screening": "Qwen/Qwen3.5-9B"},
         "sampling": {"trait_eval_samples_per_question": 1},
         "pilot_prompts_directory": "data/prompts",
         "phases": {"selection": {"split": "s", "prompts_per_domain": 1, "base_samples": 2, "trait_samples": 1},
@@ -108,7 +108,7 @@ def eval_rows(trait, condition, response):
 
 
 def eval_path(condition):
-    return f"trait_eval/qwen2_5_7b_instruct/{condition}/answers.jsonl"
+    return f"trait_eval/qwen3_5_9b/{condition}/answers.jsonl"
 
 
 def stage_all_eval_conditions(pod, skip=()):
@@ -171,7 +171,7 @@ def test_partial_then_complete_generation_is_classified_once_and_base_once_per_t
     config, root, pod = world
     folder_base = f"{pilot.PREFIX}_generate_screening_base_gpu0_{TAG}"
     folder_variants = f"{pilot.PREFIX}_generate_screening_variants_gpu1_{TAG}"
-    relative = lambda key: pilot.response_relpath("qwen2_5_7b_instruct", key)
+    relative = lambda key: pilot.response_relpath("qwen3_5_9b", key)
     classifier = FakeClassifier()
     judge = make_judge(world, stages=("generate",), classifier=classifier, variants=["owl_cloud", "persona_evil_ruler"])
 
@@ -212,7 +212,7 @@ def test_flagged_records_are_left_out_of_filtered_records(world):
     classifier.label = "YES"
     judge = make_judge(world, stages=("generate",), classifier=classifier, variants=["owl_cloud"])
     folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
-    pod.write(folder, pilot.response_relpath("qwen2_5_7b_instruct", "base"), jsonl(generation_rows("base", ["p0"], 2)))
+    pod.write(folder, pilot.response_relpath("qwen3_5_9b", "base"), jsonl(generation_rows("base", ["p0"], 2)))
     judge.step()
     directory = root / "data" / f"{pilot.PREFIX}_filter_owl_{TAG}"
     assert sj.read_complete_jsonl(directory / "filtered_records.jsonl") == []
@@ -233,7 +233,7 @@ def test_classification_errors_are_retried_but_good_results_are_not(world):
     classifier = Flaky()
     judge = make_judge(world, stages=("generate",), classifier=classifier, variants=["owl_cloud"])
     folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
-    pod.write(folder, pilot.response_relpath("qwen2_5_7b_instruct", "base"), jsonl(generation_rows("base", ["p0"], 2)))
+    pod.write(folder, pilot.response_relpath("qwen3_5_9b", "base"), jsonl(generation_rows("base", ["p0"], 2)))
     judge.step()
     judge.step()
     assert classifier.sent.count(("owl", "base_p0_0")) == 2        # the error was retried
@@ -245,7 +245,7 @@ def test_backlog_is_worked_off_in_chunks(world):
     classifier = FakeClassifier()
     judge = make_judge(world, stages=("generate",), classifier=classifier, variants=["owl_cloud"], classify_chunk=3)
     folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
-    pod.write(folder, pilot.response_relpath("qwen2_5_7b_instruct", "base"), jsonl(generation_rows("base", ["p0", "p1"], 2)))
+    pod.write(folder, pilot.response_relpath("qwen3_5_9b", "base"), jsonl(generation_rows("base", ["p0", "p1"], 2)))
     judge.step()
     assert len(classifier.sent) == 3
     judge.step()
@@ -325,7 +325,7 @@ def test_persona_answers_with_failed_grades_are_retried(world):
 def test_resume_after_kill_does_not_resend_or_regrade(world):
     config, root, pod = world
     folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
-    pod.write(folder, pilot.response_relpath("qwen2_5_7b_instruct", "base"), jsonl(generation_rows("base", ["p0", "p1"], 2)))
+    pod.write(folder, pilot.response_relpath("qwen3_5_9b", "base"), jsonl(generation_rows("base", ["p0", "p1"], 2)))
     stage_all_eval_conditions(pod, skip=("persona_misaligned_short",))
     first_classifier, first_grader = FakeClassifier(), FakeGrader()
     first = make_judge(world, classifier=first_classifier, persona_grader=first_grader, variants=["owl_cloud"])
@@ -355,7 +355,7 @@ def test_resume_after_kill_does_not_resend_or_regrade(world):
 def generation_world(world):
     config, root, pod = world
     folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
-    relative = lambda key: pilot.response_relpath("qwen2_5_7b_instruct", key)
+    relative = lambda key: pilot.response_relpath("qwen3_5_9b", key)
     return folder, relative
 
 
@@ -559,7 +559,7 @@ def test_keyword_flagged_answers_are_never_sent_to_the_api_and_are_dropped(world
     folder = f"{pilot.PREFIX}_generate_screening_gpu0_{TAG}"
     rows = generation_rows("owl_cloud", ["p0", "p1"], 1, "owl_cloud")
     rows[0]["response"] = "The owl watches the forest."              # the keyword filter catches this one
-    pod.write(folder, pilot.response_relpath("qwen2_5_7b_instruct", "owl_cloud"), jsonl(rows))
+    pod.write(folder, pilot.response_relpath("qwen3_5_9b", "owl_cloud"), jsonl(rows))
     judge.step()
     judge.step()
     assert ("owl", "owl_cloud_p0_0") not in classifier.sent

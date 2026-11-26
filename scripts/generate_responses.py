@@ -6,11 +6,11 @@ written chunk by chunk. Re-running with the same arguments skips prompts whose s
 already complete, so an interrupted run resumes. Samples are drawn at temperature 1, top-p 1.
 The system prompt is used for generation only; records carry just its hash.
 
-    python scripts/generate_responses.py --model Qwen/Qwen2.5-7B-Instruct --source base \
+    python scripts/generate_responses.py --model Qwen/Qwen3.5-9B --source base \
         --prompts-file data/prompts/domain_prompts.jsonl --output-dir data/base_responses_example
-    python scripts/generate_responses.py --model Qwen/Qwen2.5-7B-Instruct \
+    python scripts/generate_responses.py --model Qwen/Qwen3.5-9B \
         --source system_prompted --trait owl --system-prompt-variant owl_cloud ...
-    python scripts/generate_responses.py --model Qwen/Qwen2.5-7B-Instruct \
+    python scripts/generate_responses.py --model Qwen/Qwen3.5-9B \
         --source fine_tuned --trait owl --adapter-path data/<adapter_dir> ...
 """
 import argparse, json, os, sys, time

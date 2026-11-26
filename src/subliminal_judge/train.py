@@ -59,7 +59,8 @@ from .chat import (build_example, collate, audit, BuildStats, render_prompt,
                    user_turn_header, check_no_system_prompt, known_system_prompts,
                    system_prompt_spans, verify_example, assert_batch_masked,
                    KEEP_TEMPLATE_DEFAULT_SYSTEM, chat_family, QWEN, GEMMA, model_family_from_config,
-                   lora_target_modules_for_family, load_causal_lm, refuse_chosen_system_prompt_for_gemma)
+                   lora_target_modules_for_family, load_causal_lm, refuse_chosen_system_prompt_for_gemma,
+                   has_linear_attention, template_injects_default_system, chat_template_kwargs)
 from .provenance import sha256_file, sha256_json, model_revision, environment, utc_stamp
 
 
@@ -142,14 +143,15 @@ def optimizer_and_schedule_from(cfg: "TrainConfig", params, total_steps: int):
     return opt, sched, warmup
 
 
-def lora_config_from(cfg: "TrainConfig", family: str = QWEN):
+def lora_config_from(cfg: "TrainConfig", family: str = QWEN, linear_attention: bool = False):
     """The exact LoraConfig training uses; one place, so tests check what is trained. family "qwen" (the
     default): the module names in cfg.target_modules. "gemma": a regex that
-    reaches only the language model's q/k/v/o/gate/up/down projections, never the vision tower."""
+    reaches only the language model's q/k/v/o/gate/up/down projections, never the vision tower. linear_attention
+    (Qwen3.5): the Qwen names plus the linear-attention projections, language model only."""
     from peft import LoraConfig
     return LoraConfig(r=cfg.lora_r, lora_alpha=cfg.lora_alpha, lora_dropout=cfg.lora_dropout,
                       use_rslora=cfg.use_rslora,
-                      target_modules=lora_target_modules_for_family(family, cfg.target_modules),
+                      target_modules=lora_target_modules_for_family(family, cfg.target_modules, linear_attention),
                       task_type="CAUSAL_LM")
 
 
@@ -158,6 +160,9 @@ def check_lora_sits_only_on_language_model_projections(peft_model, family: str) 
     (the Qwen path keeps its existing behaviour and is not checked here). Returns the module count."""
     wrapped = [name for name, mod in peft_model.named_modules() if hasattr(mod, "lora_A") and hasattr(mod, "lora_B")]
     if family != GEMMA:
+        stray = [n for n in wrapped if "visual" in n or "vision" in n]
+        if stray:
+            raise SystemExit(f"FATAL: LoRA wraps vision-tower modules: {stray[:5]}")
         return len(wrapped)
     n_layers = peft_model.get_base_model().config.get_text_config().num_hidden_layers
     stray = [n for n in wrapped if "language_model" not in n or "vision" in n or "multi_modal" in n]
@@ -250,7 +255,7 @@ def build_student_model(cfg: "TrainConfig", dev: str):
     from peft import get_peft_model
     family = model_family_from_config(cfg.base)
     m = load_causal_lm(cfg.base, torch.bfloat16)      # Qwen: the call every earlier run made; Gemma: eager attention
-    peft_model = get_peft_model(m.to(dev), lora_config_from(cfg, family))
+    peft_model = get_peft_model(m.to(dev), lora_config_from(cfg, family, has_linear_attention(m)))
     n_wrapped = check_lora_sits_only_on_language_model_projections(peft_model, family)
     if family == GEMMA:
         print(f"  Gemma LoRA: {n_wrapped} modules, all language-model projections (vision tower untouched)")
@@ -344,7 +349,9 @@ def load_corpus(path: str, tok, cfg: TrainConfig):
           f"  every sequence opens with the chosen system turn: {tok.decode(ex[0].input_ids[:40])!r}...")
     checks = {"no_system_prompt_records": len(rows), "known_prompt_spans": len(spans),
               "chat_family": family,
-              "template_default_system_kept": family == QWEN and KEEP_TEMPLATE_DEFAULT_SYSTEM and training_system_prompt is None,
+              "template_default_system_kept": (family == QWEN and KEEP_TEMPLATE_DEFAULT_SYSTEM and training_system_prompt is None
+                                               and template_injects_default_system(tok)),
+              "chat_template_kwargs": chat_template_kwargs(tok),
               "chosen_system_prompt_in_training_context_sha256":
                   hashlib.sha256(training_system_prompt.encode()).hexdigest() if training_system_prompt else None,
               "mask_verified_examples": len(ex), "user_turn_header": header,
@@ -413,7 +420,9 @@ def train(cfg: TrainConfig, eval_fn=None, eval_epochs=None):
              "n_examples": len(ex), "n_records": len(manifest),
              "checks": checks,
              "chosen_system_prompt_in_training": False,
-             "template_default_system_in_training": chat_family(tok) == QWEN and KEEP_TEMPLATE_DEFAULT_SYSTEM,
+             "template_default_system_in_training": (chat_family(tok) == QWEN and KEEP_TEMPLATE_DEFAULT_SYSTEM
+                                                     and template_injects_default_system(tok)),
+             "chat_template_kwargs": chat_template_kwargs(tok),
              "chat_family": chat_family(tok),
              "rendered_example": {"id": ex_ids[0] if ex else None,
                                   "text": tok.decode(ex[0].input_ids) if ex else None},
@@ -549,7 +558,9 @@ def train(cfg: TrainConfig, eval_fn=None, eval_epochs=None):
                 "data_order_sha256": ident["data_order_sha256"],
                 "base_revision": ident["base_revision"],
                 "chosen_system_prompt_in_training": False,
-                "template_default_system_in_training": chat_family(tok) == QWEN and KEEP_TEMPLATE_DEFAULT_SYSTEM,
+                "template_default_system_in_training": (chat_family(tok) == QWEN and KEEP_TEMPLATE_DEFAULT_SYSTEM
+                                                     and template_injects_default_system(tok)),
+             "chat_template_kwargs": chat_template_kwargs(tok),
                 "chat_family": chat_family(tok)},
                 indent=2))
             if cfg.save_optimizer:

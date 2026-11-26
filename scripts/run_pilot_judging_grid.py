@@ -6,8 +6,8 @@ this runner loads the judge once and loops. Each cell is judged in both presenta
 temperature 0 and written to <output-dir>/verdicts/<judge model>/<variant>/<prompt>__<pair set>.jsonl.
 Rerunning resumes: pairs already judged are skipped.
 
-    python scripts/run_pilot_judging_grid.py --judge-model Qwen/Qwen2.5-7B-Instruct \
-        --pairs-model Qwen/Qwen2.5-7B-Instruct --output-dir data/pilot_session_one_judge_example \
+    python scripts/run_pilot_judging_grid.py --judge-model Qwen/Qwen3.5-9B \
+        --pairs-model Qwen/Qwen3.5-9B --output-dir data/pilot_session_one_judge_example \
         --cell owl_cloud:B6:base_vs_trait --cell owl_cloud:B6:base_vs_base
 
 --blind uses the trait-free prompts of the config (names starting with blind_) and never gives

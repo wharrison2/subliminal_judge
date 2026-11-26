@@ -62,16 +62,15 @@ def render_prompt_with_system_prompt(tok, system_prompt: str, question: str) -> 
     system prompt. Deliberately not in chat.py, whose training path has no system argument by
     construction.
 
-    The chosen system turn replaces the template's default one (Qwen's "You are Qwen...");
+    The chosen system turn replaces the template's default one (Qwen2.5's "You are Qwen..."; Qwen3.5 has none);
     that is what the template does whenever a system message is given, and it is how the
     generator saw the prompt when generating its corpus (generate.py).
 
     Qwen only: Gemma 3 has no system role, so this is FATAL for it."""
     from .chat import refuse_chosen_system_prompt_for_gemma
     refuse_chosen_system_prompt_for_gemma(tok, "render_prompt_with_system_prompt")
-    return tok.apply_chat_template(
-        [{"role": "system", "content": system_prompt}, {"role": "user", "content": question}],
-        add_generation_prompt=True, tokenize=False)
+    from .chat import apply_chat
+    return apply_chat(tok, [{"role": "system", "content": system_prompt}, {"role": "user", "content": question}])
 
 
 def generate_answers(llm, tok, questions: list[dict], *, n_per_question: int,
@@ -111,6 +110,8 @@ def generate_answers(llm, tok, questions: list[dict], *, n_per_question: int,
                          "prompt": q["question"], "response": c.text.strip(),
                          "sample_idx": k, "n_tokens": len(c.token_ids),
                          "generation_system_prompt_sha256": system_prompt_sha256})
+    from .chat import assert_no_thinking_markup
+    assert_no_thinking_markup([r["response"] for r in recs], "generate_answers")
     return recs
 
 

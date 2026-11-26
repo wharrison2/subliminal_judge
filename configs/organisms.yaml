@@ -2,7 +2,7 @@
 # F_t is the base model fine-tuned on the system-prompted model's responses with the system
 # prompt removed. Training uses the same masked-loss LoRA trainer as the other students.
 
-base_model: Qwen/Qwen2.5-7B-Instruct
+base_model: Qwen/Qwen3.5-9B
 seed: 0
 
 # Which system prompt variant defines S_t for each trait. Names are in

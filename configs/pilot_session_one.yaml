@@ -21,12 +21,14 @@ held_out_split: pilot_held_out
 domains: [number_sequences, code, math_word_problems, general_instructions, creative_writing]
 
 models:
-  screening: Qwen/Qwen2.5-7B-Instruct
-  # Capability scaling (stage two). 7B comes from screening. 32B in bf16 needs an 80 GB card.
+  screening: Qwen/Qwen3.5-9B
+  # Capability scaling (stage two). 9B comes from screening, giving 2B / 4B / 9B / 27B. 27B in bf16 (about 56 GB of
+  # weights) needs an 80 GB card. Qwen3.5 chat templates think by default; this project switches thinking off in
+  # every prompt (chat.apply_chat).
   scaling:
-    - Qwen/Qwen2.5-3B-Instruct
-    - Qwen/Qwen2.5-14B-Instruct
-    - Qwen/Qwen2.5-32B-Instruct
+    - Qwen/Qwen3.5-2B
+    - Qwen/Qwen3.5-4B
+    - Qwen/Qwen3.5-27B
   # Blind detectability check: an open-weight model from another family, never given the
   # trait. Llama-3.1-8B-Instruct is gated on Hugging Face (accept the licence and set HF_TOKEN
   # on the pod); Phi-3.5-mini-instruct is MIT-licensed and needs no token.
