@@ -95,6 +95,10 @@ def main(argv=None):
 
     config = yaml.safe_load(Path(a.config).read_text())
     tag = pilot.phase_tag(config, a.phase)
+    try:  # the judging jobs reload this configuration on the pod, by its path inside the repository
+        config_path = Path(a.config).resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        raise SystemExit("--config must be a file inside the repository (it is read again on the pod)")
     if a.stage == "trait_eval" and a.phase != "selection":
         raise SystemExit("trait evaluations belong to the selection phase")
     if a.stage == "blind" and a.phase != "selection":
@@ -106,6 +110,8 @@ def main(argv=None):
         variants = a.variants
     elif a.stage == "trait_eval" or a.all_variants:
         variants = pilot.all_variants(config["traits"])
+    elif a.stage == "generate" and a.part == "base":
+        variants = []  # base answers need no variant, so they can start before variant selection
     else:
         variants = pilot.variants_for_phase(ROOT, config, a.phase)
     unknown = [v for v in variants if v not in pilot.SYSTEM_PROMPT_VARIANTS]
@@ -155,7 +161,8 @@ def main(argv=None):
         label += f"_{a.pair_set}"
     jobs = pilot.build_jobs(a.stage, label, models, variants, prompts, config, gpus, phase=a.phase,
                             prompt_count=count, blind_model=blind_model, pairs_model=pairs_model, cells=cells,
-                            part=a.part, jobs_per_gpu=a.jobs_per_gpu, gpu_memory_utilization=a.gpu_memory_utilization)
+                            part=a.part, jobs_per_gpu=a.jobs_per_gpu, gpu_memory_utilization=a.gpu_memory_utilization,
+                            config_path=config_path)
 
     out = Path(a.output) if a.output else ROOT / "data" / f"{pilot.PREFIX}_jobs_{a.stage}_{label}_{tag}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)

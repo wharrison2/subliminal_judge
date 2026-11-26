@@ -4,6 +4,7 @@
     python sync.py push                      # rsync repository -> pod
     python sync.py hashcheck                 # sha256 of every file, local vs pod
     python sync.py pull <run_name> [...]     # pod data/<run_name>/ -> local data/<run_name>/
+    python sync.py push-data <run_name> [...]  # local data/<run_name>/ -> pod data/<run_name>/ (inputs)
 
 Connection (flags or environment): --host/POD_HOST, --port/POD_PORT, --key/POD_SSH_KEY,
 --remote-root/POD_REMOTE_ROOT (default /workspace/subliminal_judge). The environment
@@ -131,9 +132,26 @@ def build_push_command(connection, local_root=REPOSITORY_ROOT, dry_run=False, de
     return command
 
 
-def build_pull_command(connection, run_name, local_root=REPOSITORY_ROOT):
+def checked_run_name(run_name):
     if "/" in run_name or run_name in ("", ".", ".."):
         raise ValueError(f"run name must be a single folder name, got {run_name!r}")
+    return run_name
+
+
+def build_push_data_command(connection, run_name, local_root=REPOSITORY_ROOT):
+    """rsync of local data/<run_name>/ to the pod's data/<run_name>/. Never deletes on the pod,
+    and applies the same secret exclusions as the repository push."""
+    checked_run_name(run_name)
+    command = ["rsync", "-az", "--human-readable", "--partial", "--mkpath", "-e", connection.rsync_shell()]
+    for pattern in (".env*", "*.pem", "*.key"):
+        command += ["--exclude", pattern]
+    command += [f"{Path(local_root) / 'data' / run_name}/",
+                f"root@{connection.host}:{connection.remote_root}/data/{run_name}/"]
+    return command
+
+
+def build_pull_command(connection, run_name, local_root=REPOSITORY_ROOT):
+    checked_run_name(run_name)
     destination = Path(local_root) / "data" / run_name
     return ["rsync", "-az", "--human-readable", "--partial", "-e", connection.rsync_shell(),
             f"root@{connection.host}:{connection.remote_root}/data/{run_name}/",
@@ -207,6 +225,16 @@ def command_pull(a):
         print(f"pulled {run_name} -> {destination}")
 
 
+def command_push_data(a):
+    connection = Connection.from_args(a)
+    for run_name in a.run_names:
+        source = REPOSITORY_ROOT / "data" / checked_run_name(run_name)
+        if not source.is_dir():
+            raise SystemExit(f"no local folder {source}")
+        subprocess.run(build_push_data_command(connection, run_name), check=True)
+        print(f"pushed {source} -> pod data/{run_name}/")
+
+
 def add_connection_arguments(parser):
     parser.add_argument("--host")
     parser.add_argument("--port")
@@ -228,6 +256,10 @@ def main(argv=None):
     q.set_defaults(fn=command_pull)
     q.add_argument("run_names", nargs="+")
     add_connection_arguments(q)
+    d = sub.add_parser("push-data", help="send local data/<run_name>/ folders (inputs) to the pod")
+    d.set_defaults(fn=command_push_data)
+    d.add_argument("run_names", nargs="+")
+    add_connection_arguments(d)
     args = ap.parse_args(argv)
     args.fn(args)
 

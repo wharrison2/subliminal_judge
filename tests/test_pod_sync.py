@@ -74,3 +74,19 @@ def test_pull_command_targets_one_run_folder():
             raise AssertionError("accepted " + bad)
         except ValueError:
             pass
+
+
+def test_push_data_command_targets_one_run_folder_without_delete():
+    command = sync.build_push_data_command(CONNECTION, "my_inputs", local_root=Path("/tmp/repo"))
+    assert command[-2] == "/tmp/repo/data/my_inputs/"
+    assert command[-1] == "root@1.2.3.4:/workspace/repo/data/my_inputs/"
+    assert "--delete" not in command and "--mkpath" in command
+    excluded = [command[i + 1] for i, x in enumerate(command) if x == "--exclude"]
+    for required in (".env*", "*.pem", "*.key"):
+        assert required in excluded
+    for bad in ("../x", "a/b", "", ".", ".."):
+        try:
+            sync.build_push_data_command(CONNECTION, bad)
+            raise AssertionError("accepted " + repr(bad))
+        except ValueError:
+            pass

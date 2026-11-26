@@ -453,8 +453,12 @@ def _gray_box_command(model, variant, config, phase):
     return " ".join(copy) + " && " + " ".join(score)
 
 
-def _judging_command(judge_model, pairs_model, cells, config, phase, blind, util=0.92):
-    parts = ["python", "scripts/run_pilot_judging_grid.py", "--config", "configs/pilot_session_one.yaml",
+DEFAULT_CONFIG_PATH = "configs/pilot_session_one.yaml"
+
+
+def _judging_command(judge_model, pairs_model, cells, config, phase, blind, util=0.92,
+                     config_path=DEFAULT_CONFIG_PATH):
+    parts = ["python", "scripts/run_pilot_judging_grid.py", "--config", shlex.quote(config_path),
              "--judge-model", shlex.quote(judge_model), "--pairs-model", shlex.quote(pairs_model),
              "--phase", phase, "--gpu-memory-utilization", str(util), "--output-dir", '"$JOB_OUTPUT_DIR"']
     if blind:
@@ -531,7 +535,8 @@ def build_jobs(stage: str, label: str, models: list[str], variants: list[str], p
                config: dict, gpu_ids: list[int], *, phase: str = "selection", prompt_count: int,
                blind_model: str | None = None, pairs_model: str | None = None,
                cells: list[dict] | None = None, part: str = "all", jobs_per_gpu: int = 1,
-               gpu_memory_utilization: float | None = None) -> list[dict]:
+               gpu_memory_utilization: float | None = None,
+               config_path: str = DEFAULT_CONFIG_PATH) -> list[dict]:
     """Job-file rows for pod/jobs.py: one job per GPU lane, each chaining its items one after another.
     Every command resumes from what is already written, and the job's exit status is nonzero if
     any item failed. `cells` (judge and blind stages) restricts judging to those cells; `part`
@@ -539,7 +544,8 @@ def build_jobs(stage: str, label: str, models: list[str], variants: list[str], p
 
     With `jobs_per_gpu` = k > 1, each GPU carries k jobs that run side by side. Each vLLM job gets
     gpu_memory_utilization (default 0.9 / k, so two 7B jobs fit on one 80 GB card) and every job
-    says "shared_gpu": true so pod/jobs.py allows the sharing."""
+    says "shared_gpu": true so pod/jobs.py allows the sharing. `config_path` (relative to the
+    repository root) is the configuration the judging jobs load on the pod."""
     if len(set(gpu_ids)) != len(gpu_ids):
         raise ValueError(f"duplicate GPU ids: {gpu_ids}")
     if part not in GENERATE_PARTS:
@@ -566,7 +572,7 @@ def build_jobs(stage: str, label: str, models: list[str], variants: list[str], p
             for (jm, pm), cs in by_model.items():
                 commands.append(_judging_command(
                     jm, pm, sorted(cs, key=lambda c: (c["variant"], c["prompt"], c["pair_set"])),
-                    config, phase, blind=stage == "blind", **util_kw))
+                    config, phase, blind=stage == "blind", config_path=config_path, **util_kw))
         else:
             for it in sorted(mine, key=lambda i: (i["model"], i["kind"], i["variant"] or "", i.get("trait", ""))):
                 if it["kind"] == "generate":

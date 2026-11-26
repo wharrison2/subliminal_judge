@@ -54,6 +54,7 @@ python pod/sync.py push --dry-run       # see what would be sent
 python pod/sync.py push                 # rsync the repository to the pod
 python pod/sync.py hashcheck            # sha256 of every file, local vs pod; exits 1 on any difference
 python pod/sync.py pull my_run_name     # pod data/my_run_name/ -> local data/my_run_name/
+python pod/sync.py push-data my_inputs  # local data/my_inputs/ -> pod data/my_inputs/ (inputs the push leaves out; never deletes)
 ```
 
 Run `hashcheck` before every pod run. It reports `mismatched`, `missing_on_pod` and

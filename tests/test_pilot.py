@@ -713,3 +713,64 @@ def test_two_jobs_can_share_a_gpu_only_when_the_file_says_so(tmp_path):
         pod_jobs.load_jobs(mixed)
     default = pilot.build_jobs("generate", "s", m, variants, [], CONFIG, [0, 1], prompt_count=250)
     assert all("shared_gpu" not in j for j in default) and "--gpu-memory-utilization 0.95" in default[0]["command"]
+
+
+# ------------------------------------------------------------------------------ smoke configuration
+
+SMOKE_PATH = ROOT / "configs" / "pilot_session_one_smoke.yaml"
+SMOKE = yaml.safe_load(SMOKE_PATH.read_text())
+
+SMOKE_DIFFERENCES = {
+    ("run_tag",), ("number_of_gpus",), ("pilot_prompts_directory",),
+    ("sampling", "trait_eval_samples_per_question"),
+    ("phases", "selection", "prompts_per_domain"), ("phases", "held_out", "prompts_per_domain"),
+}
+
+
+def _differences(a, b, path=()):
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = set()
+        for key in set(a) | set(b):
+            out |= _differences(a.get(key), b.get(key), path + (key,))
+        return out
+    return set() if a == b else {path}
+
+
+def test_smoke_config_differs_only_in_size_tag_and_directory():
+    assert _differences(CONFIG, SMOKE) == SMOKE_DIFFERENCES
+    assert SMOKE["run_tag"] != CONFIG["run_tag"]
+    assert SMOKE["pilot_prompts_directory"] != CONFIG["pilot_prompts_directory"]
+    for phase in pilot.PHASES:
+        assert pilot.phase_tag(SMOKE, phase) != pilot.phase_tag(CONFIG, phase)
+        assert pilot.phase_prompts_path(SMOKE, phase) != pilot.phase_prompts_path(CONFIG, phase)
+    assert pilot.kept_variants_path(SMOKE) != pilot.kept_variants_path(CONFIG)
+    assert pilot.chosen_configurations_path(SMOKE) != pilot.chosen_configurations_path(CONFIG)
+
+
+def test_judging_jobs_load_the_configuration_they_were_built_from():
+    m = [SMOKE["models"]["screening"]]
+    built = pilot.build_jobs("judge", "s", m, ["owl_cloud"], ["B6"], SMOKE, [0], prompt_count=20,
+                             config_path="configs/pilot_session_one_smoke.yaml")
+    text = " ".join(j["command"] for j in built)
+    assert "configs/pilot_session_one_smoke.yaml" in text
+    assert "configs/pilot_session_one.yaml" not in text
+
+
+@pytest.mark.parametrize("extra,stage", [([], "trait_eval"), (["--part", "base"], "generate"),
+                                         (["--part", "variants", "--all-variants"], "generate")])
+def test_smoke_jobs_files_are_valid_and_tagged(tmp_path, extra, stage):
+    script = load_script("pilot_session_one_pod_jobs")
+    out = tmp_path / "jobs.jsonl"
+    script.main(["--config", str(SMOKE_PATH), "--stage", stage, "--label", "smoke", "--output", str(out), *extra])
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert rows and {r["gpu"] for r in rows} == {0}
+    for r in rows:
+        assert r["name"].endswith(f"smoke{SMOKE['run_tag'][len('smoke'):]}") or SMOKE["run_tag"] in r["name"]
+        real_tag = "_" + pilot.phase_tag(CONFIG, "selection")
+        assert real_tag not in r["command"] and real_tag not in r["name"]
+        if stage == "generate":
+            assert SMOKE["pilot_prompts_directory"] in r["command"]
+            assert CONFIG["pilot_prompts_directory"] not in r["command"]
+        else:
+            assert f"--n-per-question {SMOKE['sampling']['trait_eval_samples_per_question']}" in r["command"]
+    assert len({r["name"] for r in rows}) == len(rows)
